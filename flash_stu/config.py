@@ -47,3 +47,4 @@ class FlashSTUConfig(PretrainedConfig):
         self.use_attn = use_attn
         self.softcap = softcap
         self.torch_dtype = torch_dtype
+        self.mlp_scale = mlp_scale

@@ -41,16 +41,17 @@ class AttentionLayer(nn.Module):
             if triton_norm
             else RMSNorm(config.n_embd, dtype=config.torch_dtype)
         )
-        self.mlp = (
-            TritonMLP(config) if triton_mlp else MLP(config, dtype=config.torch_dtype)
-        )
+        # self.mlp = (
+        #     TritonMLP(config) if triton_mlp else MLP(config, dtype=config.torch_dtype)
+        # )
+        self.mlp = MLP(config, dtype=config.torch_dtype)
 
         # TODO: Write Issue in Liger-Kernel repo to support user-defined dtype for MLP
         self.attn_norm = self.attn_norm.to(dtype=config.torch_dtype)
-        self.mlp = self.mlp.to(dtype=config.torch_dtype)
+        # self.mlp = self.mlp.to(dtype=config.torch_dtype)
         self.mlp_norm = self.mlp_norm.to(dtype=config.torch_dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.attn_norm(x))
-        x = x + self.mlp(self.mlp_norm(x))
+        x = x + self.attn(self.attn_norm(x).to(x.dtype))
+        x = x + self.mlp(self.mlp_norm(x).to(x.dtype))
         return x

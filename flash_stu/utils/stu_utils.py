@@ -2,7 +2,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from flashfftconv import FlashFFTConv
+try:
+    from flashfftconv import FlashFFTConv
+    flash_fft_available = True
+except ImportError as e:
+    print(f"Unable to import FlashFFTConv: {e}. Falling back to PyTorch implementation.")
+    FlashFFTConv = None
+    flash_fft_available = False
 
 from flash_stu.utils.numerics import nearest_power_of_two
 
@@ -50,6 +56,8 @@ def convolve(u: torch.Tensor, v: torch.Tensor, n: int, use_approx: bool = True) 
         v = v.view(1, -1, K, 1, 1).to(torch.float32) # (bsz, seq_len, K, d_in, stack)
         u = u.view(bsz, -1, 1, d_in).expand(bsz, -1, K, d_in)
 
+    input_dtype = u.dtype
+
     v = torch.fft.rfft(v, n=n, dim=1)
     U = torch.stack([u, u * sgn], dim=-1).to(torch.float32)
     U = torch.fft.rfft(U, n=n, dim=1)
@@ -57,7 +65,7 @@ def convolve(u: torch.Tensor, v: torch.Tensor, n: int, use_approx: bool = True) 
     U_plus, U_minus = torch.unbind(U_conv, dim=-1)
     U_minus = U_minus * sgn
 
-    return U_plus, U_minus
+    return U_plus.to(input_dtype), U_minus.to(input_dtype)
 
 def flash_convolve(
     u: torch.Tensor, v: torch.Tensor, flash_fft: FlashFFTConv, use_approx: bool = True,

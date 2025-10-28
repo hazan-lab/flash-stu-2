@@ -18,7 +18,7 @@ class STU(nn.Module):
     def __init__(self, config, phi, n) -> None:
         super(STU, self).__init__()
         self.config = config
-        self.phi = phi
+        self.register_buffer('phi', phi, persistent=False)
         self.n = n
         self.K = config.num_eigh
         self.d_in = config.n_embd
