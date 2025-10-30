@@ -292,7 +292,13 @@ class FlashSTU(PreTrainedModel):
             save_directory: Directory to save to
             **kwargs: Additional arguments passed to parent
         """
+        # Save original torch_dtype before serialization (HF mutates it to string)
+        original_dtype = self.config.torch_dtype
+        
         super().save_pretrained(save_directory, **kwargs)
+        
+        # Restore original torch_dtype after serialization
+        self.config.torch_dtype = original_dtype
 
     @classmethod
     def from_pretrained(cls, *args, **kwargs):
