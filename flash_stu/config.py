@@ -5,6 +5,13 @@ from transformers import PretrainedConfig
 
 class FlashSTUConfig(PretrainedConfig):
     model_type = "FlashSTU"
+    
+    def to_dict(self):
+        """Override to_dict to properly serialize torch_dtype."""
+        output = super().to_dict()
+        if hasattr(self, 'torch_dtype') and isinstance(self.torch_dtype, torch.dtype):
+            output['torch_dtype'] = str(self.torch_dtype).replace('torch.', '')
+        return output
 
     def __init__(
         self,
@@ -25,9 +32,12 @@ class FlashSTUConfig(PretrainedConfig):
         use_attn: bool = True,
         softcap: float = 50.0,
         torch_dtype: torch.dtype = torch.bfloat16,
+        tie_word_embeddings: bool = True,
+        stu_enable_mlp_sandwich: bool = False,
+        stu_mlp_hidden_size: int = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(tie_word_embeddings=tie_word_embeddings, **kwargs)
         self.bsz = bsz
         self.n_embd = n_embd
         self.n_heads = n_heads
@@ -46,5 +56,12 @@ class FlashSTUConfig(PretrainedConfig):
         self.use_approx = use_approx
         self.use_attn = use_attn
         self.softcap = softcap
-        self.torch_dtype = torch_dtype
+        self.stu_enable_mlp_sandwich = stu_enable_mlp_sandwich
+        self.stu_mlp_hidden_size = stu_mlp_hidden_size
+        if torch_dtype is None:
+            self.torch_dtype = torch.float32
+        elif isinstance(torch_dtype, str):
+            self.torch_dtype = getattr(torch, torch_dtype)
+        else:
+            self.torch_dtype = torch_dtype
         self.mlp_scale = mlp_scale

@@ -17,9 +17,7 @@ class MLP(nn.Module):
         self.down_proj = nn.Linear(
             self.intermediate_size, self.hidden_size, bias=config.bias, dtype=dtype
         )
-        self.dropout = nn.Dropout(
-            config.dropout
-        )  # TODO: Write Issue in Liger-Kernel repo to support Dropout
+        self.dropout = nn.Dropout(config.dropout)
     
     def forward(self, x):
         gate = self.gate_proj(x)

@@ -6,7 +6,6 @@ from flash_stu.modules.swiglu import MLP
 
 try:
     from liger_kernel.transformers.swiglu import LigerSwiGLUMLP as TritonMLP
-
     triton_mlp = True
 except ImportError as e:
     print(
@@ -16,7 +15,6 @@ except ImportError as e:
 
 try:
     from liger_kernel.transformers.rms_norm import LigerRMSNorm as TritonNorm
-
     triton_norm = True
 except ImportError as e:
     print(
@@ -41,14 +39,10 @@ class AttentionLayer(nn.Module):
             if triton_norm
             else RMSNorm(config.n_embd, dtype=config.torch_dtype)
         )
-        # self.mlp = (
-        #     TritonMLP(config) if triton_mlp else MLP(config, dtype=config.torch_dtype)
-        # )
         self.mlp = MLP(config, dtype=config.torch_dtype)
 
         # TODO: Write Issue in Liger-Kernel repo to support user-defined dtype for MLP
         self.attn_norm = self.attn_norm.to(dtype=config.torch_dtype)
-        # self.mlp = self.mlp.to(dtype=config.torch_dtype)
         self.mlp_norm = self.mlp_norm.to(dtype=config.torch_dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

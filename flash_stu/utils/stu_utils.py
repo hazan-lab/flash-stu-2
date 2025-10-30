@@ -5,8 +5,7 @@ import torch.nn.functional as F
 try:
     from flashfftconv import FlashFFTConv
     flash_fft_available = True
-except ImportError as e:
-    print(f"Unable to import FlashFFTConv: {e}. Falling back to PyTorch implementation.")
+except ImportError:
     FlashFFTConv = None
     flash_fft_available = False
 

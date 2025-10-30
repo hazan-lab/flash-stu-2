@@ -27,28 +27,69 @@ except ImportError as e:
 class STULayer(nn.Module):
     def __init__(self, config, phi, n):
         super(STULayer, self).__init__()
+        self.config = config
         self.stu_norm = (
             TritonNorm(config.n_embd)
             if triton_norm
             else RMSNorm(config.n_embd, dtype=config.torch_dtype)
         )
-        self.stu = STU(config, phi, n)
+        
+        # STU sandwich MLP (optional)
+        self.stu_mlp_enabled = config.stu_enable_mlp_sandwich
+        if self.stu_mlp_enabled:
+            self.stu_mlp_hidden_size = (
+                config.stu_mlp_hidden_size
+                if config.stu_mlp_hidden_size is not None
+                else config.intermediate_size
+            )
+            # Up-project to hidden size
+            self.stu_mlp_in_proj = nn.Linear(
+                config.n_embd,
+                self.stu_mlp_hidden_size,
+                bias=config.bias,
+                dtype=config.torch_dtype,
+            )
+            # Activation (SiLU/Swish)
+            self.stu_mlp_act = nn.SiLU()
+            # STU operates on the activated dimension
+            self.stu = STU(config, phi, n, feature_dim=self.stu_mlp_hidden_size)
+            # Down-project back to d_model
+            self.stu_mlp_out_proj = nn.Linear(
+                self.stu_mlp_hidden_size,
+                config.n_embd,
+                bias=config.bias,
+                dtype=config.torch_dtype,
+            )
+        else:
+            self.stu = STU(config, phi, n)
+        
         self.mlp_norm = (
             TritonNorm(config.n_embd)
             if triton_norm
             else RMSNorm(config.n_embd, dtype=config.torch_dtype)
         )
-        # self.mlp = (
-        #     TritonMLP(config) if triton_mlp else MLP(config, dtype=config.torch_dtype)
-        # )
         self.mlp = MLP(config, dtype=config.torch_dtype)
 
         # TODO: Write Issue in Liger-Kernel repo to support user-defined dtype for MLP
         self.stu_norm = self.stu_norm.to(dtype=config.torch_dtype)
-        # self.mlp = self.mlp.to(dtype=config.torch_dtype)
         self.mlp_norm = self.mlp_norm.to(dtype=config.torch_dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.stu(self.stu_norm(x).to(x.dtype))
+        # STU path with optional sandwiching
+        h = self.stu_norm(x).to(x.dtype)
+        
+        if self.stu_mlp_enabled:
+            # Apply sandwich MLP: up-project -> activate -> STU -> down-project
+            h = self.stu_mlp_in_proj(h)
+            h = self.stu_mlp_act(h)
+            h = self.stu(h)
+            h = self.stu_mlp_out_proj(h)
+        else:
+            # Standard STU without sandwiching
+            h = self.stu(h)
+        
+        x = x + h
+        
+        # MLP path
         x = x + self.mlp(self.mlp_norm(x).to(x.dtype))
         return x

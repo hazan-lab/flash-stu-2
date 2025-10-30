@@ -148,8 +148,8 @@ def main():
         "use_activation_checkpointing": use_activation_checkpointing,
     }
     
-    phi = get_spectral_filters(seq_len, num_eigh, use_hankel_L, device, torch_dtype)
-    model = FlashSTU(config, phi)
+    # Model now computes phi internally - no need to pass it
+    model = FlashSTU(config)
     if torch_compile:
         model = torch.compile(model)
         if main_process:
@@ -259,11 +259,12 @@ def main():
                     inputs, targets = inputs.to(device), targets.to(device)
                     if torch_dtype != torch.float32:
                         with autocast(device_type=device.type, dtype=torch_dtype, cache_enabled=cache_enabled):
-                            preds = model(inputs)
+                            outputs = model(input_ids=inputs, labels=targets)
                     else:
-                        preds = model(inputs)
+                        outputs = model(input_ids=inputs, labels=targets)
 
-                    loss = loss_fn(preds.flatten(0, 1), targets.flatten(0, 1))
+                    # Model now returns dict with loss already computed
+                    loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
                     loss = loss / val_steps
                     val_loss += loss.detach().float()
 
@@ -301,11 +302,12 @@ def main():
             with context:
                 if torch_dtype != torch.float32:
                     with autocast(device_type=device.type, dtype=torch_dtype, cache_enabled=cache_enabled):
-                        preds = model(inputs)
+                        outputs = model(input_ids=inputs, labels=targets)
                 else:
-                    preds = model(inputs)
+                    outputs = model(input_ids=inputs, labels=targets)
 
-                loss = loss_fn(preds.flatten(0, 1), targets.flatten(0, 1))
+                # Model now returns dict with loss already computed
+                loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
                 loss = loss / gradient_accumulation_steps
                 train_loss += loss.detach().float()
                 scaler.scale(loss).backward() if use_scaler else loss.backward()

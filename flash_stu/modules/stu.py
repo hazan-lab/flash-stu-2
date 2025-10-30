@@ -5,24 +5,20 @@ from flash_stu.utils.stu_utils import convolve, flash_convolve
 
 try:
     from flashfftconv import FlashFFTConv
-
     flash_fft_available = True
-except ImportError as e:
-    print(
-        f"Unable to import FlashFFTConv: {e}. Falling back to PyTorch implementation."
-    )
+except ImportError:
     flash_fft_available = False
 
 
 class STU(nn.Module):
-    def __init__(self, config, phi, n) -> None:
+    def __init__(self, config, phi, n, feature_dim=None) -> None:
         super(STU, self).__init__()
         self.config = config
         self.register_buffer('phi', phi, persistent=False)
         self.n = n
         self.K = config.num_eigh
-        self.d_in = config.n_embd
-        self.d_out = config.n_embd
+        self.d_in = feature_dim if feature_dim is not None else config.n_embd
+        self.d_out = feature_dim if feature_dim is not None else config.n_embd
         self.use_hankel_L = config.use_hankel_L
         self.use_approx = config.use_approx
         self.flash_fft = (

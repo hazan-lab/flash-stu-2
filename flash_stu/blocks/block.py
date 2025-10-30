@@ -20,6 +20,8 @@ class FlashSTUBlock(nn.Module):
         use_flash_fft: Whether to use FlashFFT
         use_attention: Whether to include attention in this block
         attention_config: Dict with attention-specific settings (n_heads, softcap, etc.)
+        stu_enable_mlp_sandwich: Whether to wrap STU with MLP projections (up-project -> activate -> STU -> down-project)
+        stu_mlp_hidden_size: Hidden size for sandwich MLP. Defaults to intermediate_size if not set
         **kwargs: Other config options (dropout, bias, etc.)
     """
     def __init__(
@@ -45,6 +47,8 @@ class FlashSTUBlock(nn.Module):
         dropout: float = 0.0, 
         bias: bool = False,
         torch_dtype: torch.dtype = torch.bfloat16,
+        stu_enable_mlp_sandwich: bool = False,
+        stu_mlp_hidden_size: Optional[int] = None,
         **kwargs,
     ):    
         super(FlashSTUBlock, self).__init__()
@@ -83,6 +87,8 @@ class FlashSTUBlock(nn.Module):
                 'n_layers': 1,
                 'bsz': 1,
                 'vocab_size': 1,
+                'stu_enable_mlp_sandwich': stu_enable_mlp_sandwich,
+                'stu_mlp_hidden_size': stu_mlp_hidden_size,
             }
             
             # Override with attention_config if provided
