@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from flash_stu.modules.stu import STU
 from flash_stu.modules.swiglu import MLP
@@ -74,19 +75,8 @@ class STULayer(nn.Module):
         self.stu_norm = self.stu_norm.to(dtype=config.torch_dtype)
         self.mlp_norm = self.mlp_norm.to(dtype=config.torch_dtype)
 
-    def forward(self, x: torch.Tensor, past_key_value=None, use_cache=False):
-        """
-        Forward pass. STU layers don't use KV cache, so past_key_value is ignored.
-        
-        Args:
-            x: Input tensor [batch_size, seq_len, d_model]
-            past_key_value: Ignored (for interface compatibility with AttentionLayer)
-            use_cache: Ignored (for interface compatibility with AttentionLayer)
-        
-        Returns:
-            If use_cache=False: output tensor
-            If use_cache=True: (output tensor, None)
-        """
+    def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
+        """Internal forward implementation (for checkpointing)."""
         # STU path with optional sandwiching
         h = self.stu_norm(x).to(x.dtype)
         
@@ -104,6 +94,26 @@ class STULayer(nn.Module):
         
         # MLP path
         x = x + self.mlp(self.mlp_norm(x).to(x.dtype))
+        return x
+    
+    def forward(self, x: torch.Tensor, past_key_value=None, use_cache=False):
+        """
+        Forward pass. STU layers don't use KV cache, so past_key_value is ignored.
+        
+        Args:
+            x: Input tensor [batch_size, seq_len, d_model]
+            past_key_value: Ignored (for interface compatibility with AttentionLayer)
+            use_cache: Ignored (for interface compatibility with AttentionLayer)
+        
+        Returns:
+            If use_cache=False: output tensor
+            If use_cache=True: (output tensor, None)
+        """
+        # Use gradient checkpointing if enabled and training
+        if self.config.use_gradient_checkpointing and self.training:
+            x = checkpoint(self._forward_impl, x, use_reentrant=False)
+        else:
+            x = self._forward_impl(x)
         
         if use_cache:
             return x, None  # since STU layers don't have KV cache

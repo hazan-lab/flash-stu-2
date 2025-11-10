@@ -31,6 +31,7 @@ class FlashSTUConfig(PretrainedConfig):
         use_approx: bool = True,
         use_attn: bool = True,
         use_cache: bool = True,
+        use_gradient_checkpointing: bool = False,
         softcap: float = 50.0,
         torch_dtype: torch.dtype = torch.bfloat16,
         tie_word_embeddings: bool = True,
@@ -58,6 +59,7 @@ class FlashSTUConfig(PretrainedConfig):
         self.use_approx = use_approx
         self.use_attn = use_attn
         self.use_cache = use_cache
+        self.use_gradient_checkpointing = use_gradient_checkpointing
         self.softcap = softcap
         self.stu_enable_mlp_sandwich = stu_enable_mlp_sandwich
         self.stu_mlp_hidden_size = stu_mlp_hidden_size

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from flash_stu.modules.attention import Attention
 from flash_stu.modules.swiglu import MLP
@@ -28,6 +29,7 @@ except ImportError as e:
 class AttentionLayer(nn.Module):
     def __init__(self, config) -> None:
         super(AttentionLayer, self).__init__()
+        self.config = config
         self.attn_norm = (
             TritonNorm(config.n_embd)
             if triton_norm
@@ -45,19 +47,8 @@ class AttentionLayer(nn.Module):
         self.attn_norm = self.attn_norm.to(dtype=config.torch_dtype)
         self.mlp_norm = self.mlp_norm.to(dtype=config.torch_dtype)
 
-    def forward(self, x: torch.Tensor, past_key_value=None, use_cache=True):
-        """
-        Forward pass with optional KV caching.
-        
-        Args:
-            x: Input tensor [batch_size, seq_len, d_model]
-            past_key_value: Optional past key/value for attention layer
-            use_cache: Whether to return key/value for caching
-        
-        Returns:
-            If use_cache=False: output tensor
-            If use_cache=True: (output tensor, present_key_value)
-        """
+    def _forward_impl(self, x: torch.Tensor, past_key_value=None, use_cache=False):
+        """Internal forward implementation (for checkpointing)."""
         # Attention with residual connection
         attn_input = self.attn_norm(x).to(x.dtype)
         if use_cache:
@@ -73,3 +64,24 @@ class AttentionLayer(nn.Module):
         if use_cache:
             return x, present_key_value
         return x
+
+    def forward(self, x: torch.Tensor, past_key_value=None, use_cache=True):
+        """
+        Forward pass with optional KV caching.
+        
+        Args:
+            x: Input tensor [batch_size, seq_len, d_model]
+            past_key_value: Optional past key/value for attention layer
+            use_cache: Whether to return key/value for caching
+        
+        Returns:
+            If use_cache=False: output tensor
+            If use_cache=True: (output tensor, present_key_value)
+        """
+        # Note: Gradient checkpointing is incompatible with KV caching
+        # because caching requires returning intermediate states
+        if self.config.use_gradient_checkpointing and self.training and not use_cache:
+            # Can only checkpoint when not using cache
+            return checkpoint(self._forward_impl, x, past_key_value, use_cache, use_reentrant=False)
+        else:
+            return self._forward_impl(x, past_key_value, use_cache)
