@@ -58,7 +58,7 @@ class FlashSTU(PreTrainedModel):
         self.use_hankel_L = config.use_hankel_L
         
         # Compute and register phi as a buffer
-        phi = get_spectral_filters(config.num_eigh, config.seq_len)
+        phi = get_spectral_filters(config.seq_len, config.num_eigh)
         self.register_buffer('phi', phi, persistent=True)
 
         # Embedding layer
@@ -103,7 +103,9 @@ class FlashSTU(PreTrainedModel):
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
         labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         **kwargs
@@ -114,7 +116,9 @@ class FlashSTU(PreTrainedModel):
         Args:
             input_ids: Token IDs of shape [batch_size, seq_len]
             attention_mask: Attention mask (currently unused, for HF compatibility)
+            past_key_values: Tuple of past key/value pairs for each layer (for KV caching)
             labels: Labels for computing language modeling loss [batch_size, seq_len]
+            use_cache: Whether to return present key/values for caching
             output_hidden_states: Whether to return hidden states
             return_dict: Whether to return a dict (always True for HF compatibility)
         
@@ -122,9 +126,11 @@ class FlashSTU(PreTrainedModel):
             Dictionary with:
                 - logits: Output logits [batch_size, seq_len, vocab_size]
                 - loss: Language modeling loss (if labels provided)
+                - past_key_values: Present key/values for next iteration (if use_cache=True)
                 - hidden_states: List of hidden states (if output_hidden_states=True)
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict if hasattr(self.config, 'use_return_dict') else True
+        use_cache = use_cache if use_cache is not None else (self.config.use_cache if hasattr(self.config, 'use_cache') else False)
         output_hidden_states = output_hidden_states if output_hidden_states is not None else False
 
         # Input validation
@@ -133,6 +139,8 @@ class FlashSTU(PreTrainedModel):
         
         # Store hidden states if requested
         all_hidden_states = () if output_hidden_states else None
+        # Store present key/values if caching
+        next_decoder_cache = () if use_cache else None
 
         # Embedding
         x = self.tok_emb(input_ids)
@@ -142,8 +150,16 @@ class FlashSTU(PreTrainedModel):
             all_hidden_states = all_hidden_states + (x,)
 
         # Pass through transformer layers
-        for layer in self.layers:
-            x = layer(x)
+        for idx, layer in enumerate(self.layers):
+            # Get past key/value for this layer if available
+            past_key_value = past_key_values[idx] if past_key_values is not None else None
+            
+            if use_cache:
+                x, present_key_value = layer(x, past_key_value=past_key_value, use_cache=True)
+                next_decoder_cache = next_decoder_cache + (present_key_value,)
+            else:
+                x = layer(x, past_key_value=past_key_value, use_cache=False)
+            
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (x,)
 
@@ -169,6 +185,8 @@ class FlashSTU(PreTrainedModel):
 
         if not return_dict:
             output = (logits,)
+            if use_cache:
+                output = output + (next_decoder_cache,)
             if output_hidden_states:
                 output = output + (all_hidden_states,)
             return ((loss,) + output) if loss is not None else output
@@ -176,7 +194,7 @@ class FlashSTU(PreTrainedModel):
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            past_key_values=None,  # We don't use KV cache yet
+            past_key_values=next_decoder_cache,
             hidden_states=all_hidden_states if output_hidden_states else None,
         )
 
@@ -189,10 +207,11 @@ class FlashSTU(PreTrainedModel):
         top_k: Optional[int] = None,
         top_p: Optional[float] = None,
         do_sample: bool = True,
+        use_cache: bool = True,
         **kwargs
     ) -> torch.LongTensor:
         """
-        Generate text autoregressively.
+        Generate text autoregressively with KV caching for efficiency.
         
         Args:
             input_ids: Starting tokens [batch_size, seq_len]
@@ -201,6 +220,7 @@ class FlashSTU(PreTrainedModel):
             top_k: Keep only top k tokens with highest probability
             top_p: Keep top tokens with cumulative probability >= top_p (nucleus sampling)
             do_sample: Whether to sample or use greedy decoding
+            use_cache: Whether to use KV caching (default: True, much faster)
         
         Returns:
             Generated token IDs [batch_size, max_length]
@@ -214,17 +234,29 @@ class FlashSTU(PreTrainedModel):
         
         # Start with the input
         generated = input_ids
+        past_key_values = None
         
-        for _ in range(max_length - input_ids.shape[1]):
-            # Get predictions for the last token
-            # Truncate to max sequence length if needed
-            if generated.shape[1] > self.config.seq_len:
-                input_seq = generated[:, -self.config.seq_len:]
+        for step in range(max_length - input_ids.shape[1]):
+            # For the first step, use full input. After that, only use the last token with cache
+            if use_cache and past_key_values is not None:
+                # Only pass the last token (KV cache handles the rest)
+                input_seq = generated[:, -1:]
             else:
-                input_seq = generated
+                # Truncate to max sequence length if needed
+                if generated.shape[1] > self.config.seq_len:
+                    input_seq = generated[:, -self.config.seq_len:]
+                    # Reset cache if we had to truncate
+                    past_key_values = None
+                else:
+                    input_seq = generated
             
-            outputs = self(input_seq)
+            # Get model outputs with caching
+            outputs = self(input_seq, past_key_values=past_key_values, use_cache=use_cache)
             logits = outputs.logits if hasattr(outputs, 'logits') else outputs['logits']
+            
+            # Update cache for next iteration
+            if use_cache:
+                past_key_values = outputs.past_key_values if hasattr(outputs, 'past_key_values') else outputs.get('past_key_values')
             
             # Get logits for the last token and clamp extreme values
             next_token_logits = logits[:, -1, :] / temperature
@@ -268,6 +300,9 @@ class FlashSTU(PreTrainedModel):
     def prepare_inputs_for_generation(
         self,
         input_ids: torch.LongTensor,
+        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        use_cache: Optional[bool] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -275,13 +310,23 @@ class FlashSTU(PreTrainedModel):
         
         Args:
             input_ids: Input token IDs
+            past_key_values: Past key/values for KV caching
+            attention_mask: Attention mask
+            use_cache: Whether to use KV caching
             **kwargs: Additional arguments
         
         Returns:
             Dictionary of inputs for the model
         """
+        # If we have past_key_values, only pass the last token
+        if past_key_values is not None:
+            input_ids = input_ids[:, -1:]
+        
         return {
             "input_ids": input_ids,
+            "past_key_values": past_key_values,
+            "use_cache": use_cache,
+            "attention_mask": attention_mask,
         }
 
     def save_pretrained(self, save_directory: str, **kwargs):
@@ -349,6 +394,30 @@ class FlashSTU(PreTrainedModel):
     def _get_num_params(self):
         """Backward compatibility with old code."""
         return self.get_num_params(non_embedding=False)
+
+    @staticmethod
+    def _reorder_cache(past_key_values: Tuple[Tuple[torch.Tensor]], beam_idx: torch.Tensor) -> Tuple[Tuple[torch.Tensor]]:
+        """
+        Reorder past key/values for beam search. Required by HuggingFace generation utilities.
+        
+        Args:
+            past_key_values: Tuple of past key/value pairs for each layer
+            beam_idx: Indices of selected beams
+        
+        Returns:
+            Reordered past_key_values
+        """
+        reordered_past = ()
+        for layer_past in past_key_values:
+            # Layer past can be None for STU layers
+            if layer_past is None:
+                reordered_past += (None,)
+            else:
+                # Reorder the past keys and values
+                reordered_past += (
+                    tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
+                )
+        return reordered_past
 
     def _init_weights(self, module):
         """Initialize weights for different module types."""

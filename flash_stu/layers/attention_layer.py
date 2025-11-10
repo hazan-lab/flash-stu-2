@@ -45,7 +45,31 @@ class AttentionLayer(nn.Module):
         self.attn_norm = self.attn_norm.to(dtype=config.torch_dtype)
         self.mlp_norm = self.mlp_norm.to(dtype=config.torch_dtype)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.attn_norm(x).to(x.dtype))
+    def forward(self, x: torch.Tensor, past_key_value=None, use_cache=True):
+        """
+        Forward pass with optional KV caching.
+        
+        Args:
+            x: Input tensor [batch_size, seq_len, d_model]
+            past_key_value: Optional past key/value for attention layer
+            use_cache: Whether to return key/value for caching
+        
+        Returns:
+            If use_cache=False: output tensor
+            If use_cache=True: (output tensor, present_key_value)
+        """
+        # Attention with residual connection
+        attn_input = self.attn_norm(x).to(x.dtype)
+        if use_cache:
+            attn_output, present_key_value = self.attn(attn_input, past_key_value=past_key_value, use_cache=True)
+            x = x + attn_output
+        else:
+            x = x + self.attn(attn_input, past_key_value=past_key_value, use_cache=False)
+            present_key_value = None
+        
+        # MLP with residual connection
         x = x + self.mlp(self.mlp_norm(x).to(x.dtype))
+        
+        if use_cache:
+            return x, present_key_value
         return x

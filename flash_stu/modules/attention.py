@@ -56,7 +56,19 @@ class Attention(nn.Module):
         slopes = slopes * interpolation_factor  # https://arxiv.org/pdf/2310.13017
         return slopes
 
-    def forward(self, x):
+    def forward(self, x, past_key_value=None, use_cache=True):
+        """
+        Forward pass with optional KV caching.
+        
+        Args:
+            x: Input tensor [batch_size, seq_len, d_model]
+            past_key_value: Optional tuple of (past_key, past_value) for caching
+            use_cache: Whether to return key/value for caching
+        
+        Returns:
+            If use_cache=False: output tensor
+            If use_cache=True: (output tensor, (key, value))
+        """
         bsz, seq_len, d_in = x.size()
 
         qkv = self.c_attn(x)
@@ -65,6 +77,16 @@ class Attention(nn.Module):
         q = q.view(bsz, seq_len, self.n_heads, d_in // self.n_heads)
         k = k.view(bsz, seq_len, self.n_heads, d_in // self.n_heads)
         v = v.view(bsz, seq_len, self.n_heads, d_in // self.n_heads)
+        
+        # Concatenate with past key/values if provided
+        if past_key_value is not None:
+            past_key, past_value = past_key_value
+            k = torch.cat([past_key, k], dim=1)
+            v = torch.cat([past_value, v], dim=1)
+        
+        # Store current key/value for next iteration if caching
+        present_key_value = (k, v) if use_cache else None
+        
         y = fa2(  # https://arxiv.org/pdf/2307.08691
             q,
             k,
@@ -77,4 +99,7 @@ class Attention(nn.Module):
         )
         y = y.contiguous().view(bsz, seq_len, d_in)
         y = self.resid_dropout(self.c_proj(y))
+        
+        if use_cache:
+            return y, present_key_value
         return y
