@@ -101,9 +101,15 @@ class FlashSTUBlock(nn.Module):
             phi_temp = None
             n_temp = None
         
-        # compute phi and n if not provided
+        # compute or load phi if not provided
         if phi_temp is None:
-            phi_tensor = get_spectral_filters(self.config.seq_len, self.config.num_eigh)
+            phi_tensor = get_spectral_filters(
+                self.config.seq_len, 
+                self.config.num_eigh,
+                use_hankel_L=self.config.use_hankel_L,
+                dtype=self.config.torch_dtype,
+                load_from=self.config.filter_path
+            )
             self.register_buffer('phi', phi_tensor, persistent=True)
         else:
             self.register_buffer('phi', phi_temp, persistent=True)

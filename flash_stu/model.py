@@ -57,8 +57,14 @@ class FlashSTU(PreTrainedModel):
         self.use_approx = config.use_approx
         self.use_hankel_L = config.use_hankel_L
         
-        # Compute and register phi as a buffer
-        phi = get_spectral_filters(config.seq_len, config.num_eigh)
+        # Compute or load phi and register as a buffer
+        phi = get_spectral_filters(
+            config.seq_len, 
+            config.num_eigh,
+            use_hankel_L=config.use_hankel_L,
+            dtype=config.torch_dtype,
+            load_from=config.filter_path
+        )
         self.register_buffer('phi', phi, persistent=True)
 
         # Embedding layer

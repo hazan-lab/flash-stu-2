@@ -36,6 +36,7 @@ class FlashSTUConfig(PretrainedConfig):
         tie_word_embeddings: bool = True,
         stu_enable_mlp_sandwich: bool = False,
         stu_mlp_hidden_size: int = None,
+        filter_path: str = None,  # Path to load pre-computed spectral filters
         **kwargs,
     ):
         super().__init__(tie_word_embeddings=tie_word_embeddings, **kwargs)
@@ -60,6 +61,7 @@ class FlashSTUConfig(PretrainedConfig):
         self.softcap = softcap
         self.stu_enable_mlp_sandwich = stu_enable_mlp_sandwich
         self.stu_mlp_hidden_size = stu_mlp_hidden_size
+        self.filter_path = filter_path
         if torch_dtype is None:
             self.torch_dtype = torch.float32
         elif isinstance(torch_dtype, str):
