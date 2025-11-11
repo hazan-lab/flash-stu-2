@@ -90,10 +90,10 @@ class STULayer(nn.Module):
             # Standard STU without sandwiching
             h = self.stu(h)
         
-        x = x + h
+        x.add_(h)
         
         # MLP path
-        x = x + self.mlp(self.mlp_norm(x).to(x.dtype))
+        x.add_(self.mlp(self.mlp_norm(x).to(x.dtype)))
         return x
     
     def forward(self, x: torch.Tensor, past_key_value=None, use_cache=False):

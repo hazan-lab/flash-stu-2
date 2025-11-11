@@ -53,13 +53,13 @@ class AttentionLayer(nn.Module):
         attn_input = self.attn_norm(x).to(x.dtype)
         if use_cache:
             attn_output, present_key_value = self.attn(attn_input, past_key_value=past_key_value, use_cache=True)
-            x = x + attn_output
+            x.add_(attn_output)
         else:
-            x = x + self.attn(attn_input, past_key_value=past_key_value, use_cache=False)
+            x.add_(self.attn(attn_input, past_key_value=past_key_value, use_cache=False))
             present_key_value = None
         
         # MLP with residual connection
-        x = x + self.mlp(self.mlp_norm(x).to(x.dtype))
+        x.add_(self.mlp(self.mlp_norm(x).to(x.dtype)))
         
         if use_cache:
             return x, present_key_value

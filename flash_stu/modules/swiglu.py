@@ -23,7 +23,7 @@ class MLP(nn.Module):
         gate = self.gate_proj(x)
         gate = F.gelu(gate, approximate="tanh")
         up = self.up_proj(x)
-        fuse = gate * up
-        outputs = self.down_proj(fuse)
+        gate.mul_(up)
+        outputs = self.down_proj(gate)
         outputs = self.dropout(outputs)
         return outputs
