@@ -43,31 +43,34 @@ class STU(nn.Module):
                 )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Only compute both branches if we need them (standard Hankel)
+        return_both = not self.use_hankel_L
+        
         if self.use_approx:
             # Contract inputs and filters over the K and d_in dimensions, then convolve
             x_proj = x @ self.M_inputs
             phi_proj = self.phi @ self.M_filters
             if self.flash_fft:
                 spectral_plus, spectral_minus = flash_convolve(
-                    x_proj, phi_proj, self.flash_fft, self.use_approx
+                    x_proj, phi_proj, self.flash_fft, self.use_approx, return_both
                 )
             else:
                 spectral_plus, spectral_minus = convolve(
-                    x_proj, phi_proj, self.n, self.use_approx
+                    x_proj, phi_proj, self.n, self.use_approx, return_both
                 )
         else:
             # Convolve inputs and filters,
             if self.flash_fft:
                 U_plus, U_minus = flash_convolve(
-                    x, self.phi, self.flash_fft, self.use_approx
+                    x, self.phi, self.flash_fft, self.use_approx, return_both
                 )
             else:
-                U_plus, U_minus = convolve(x, self.phi, self.n, self.use_approx)
+                U_plus, U_minus = convolve(x, self.phi, self.n, self.use_approx, return_both)
             # Then, contract over the K and d_in dimensions
             spectral_plus = torch.tensordot(
                 U_plus, self.M_phi_plus, dims=([2, 3], [0, 1])
             )
-            if not self.use_hankel_L:
+            if return_both:
                 spectral_minus = torch.tensordot(
                     U_minus, self.M_phi_minus, dims=([2, 3], [0, 1])
                 )
