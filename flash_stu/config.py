@@ -38,6 +38,8 @@ class FlashSTUConfig(PretrainedConfig):
         stu_enable_mlp_sandwich: bool = False,
         stu_mlp_hidden_size: int = None,
         filter_path: str = None,  # Path to load pre-computed spectral filters
+        d_in_tile: int = None,
+        d_out_tile: int = None,
         **kwargs,
     ):
         super().__init__(tie_word_embeddings=tie_word_embeddings, **kwargs)
@@ -64,6 +66,8 @@ class FlashSTUConfig(PretrainedConfig):
         self.stu_enable_mlp_sandwich = stu_enable_mlp_sandwich
         self.stu_mlp_hidden_size = stu_mlp_hidden_size
         self.filter_path = filter_path
+        self.d_in_tile = d_in_tile
+        self.d_out_tile = d_out_tile
         if torch_dtype is None:
             self.torch_dtype = torch.float32
         elif isinstance(torch_dtype, str):
