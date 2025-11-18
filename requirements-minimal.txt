@@ -1,0 +1,28 @@
+# Build tools
+packaging==24.1
+wheel==0.44.0
+ninja==1.11.1.1
+
+# Core scientific computing
+numpy==1.26.4
+
+# PyTorch and related (install PyTorch separately with CUDA support)
+# torch==2.4.1 (install via: pip install torch --index-url https://download.pytorch.org/whl/cu124)
+triton==3.0.0
+
+# Tensor operations
+einops==0.8.0
+
+# NLP and ML utilities
+tiktoken==0.7.0
+transformers==4.44.0
+datasets==2.20.0
+safetensors==0.4.4
+
+# Optimizations (lightweight)
+liger-kernel==0.2.1
+
+# System utilities
+psutil==6.0.0
+matplotlib==3.9.2
+

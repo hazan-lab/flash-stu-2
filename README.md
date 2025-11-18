@@ -30,7 +30,7 @@ The [STU](stu.py) module is a fast and flexible building block that can be adapt
 
 > **Note**: CUDA is required to run code from this repository.
 
-This repository was tested with:
+For optimal performance, this repository was tested with:
 - Python 3.12.5
 - PyTorch 2.4.1
 - Triton 3.0.0
@@ -38,31 +38,60 @@ This repository was tested with:
 
 and may be incompatible with other versions.
 
+### Lightweight Installation (Recommended for Development)
+
+For a minimal setup without CUDA-heavy dependencies like Flash Attention and Flash FFT:
+
 1. Install PyTorch with CUDA support:
     ```bash
     pip install torch --index-url https://download.pytorch.org/whl/cu124
     ```
 
-2. Install required packages:
+2. Install core dependencies only:
+   ```bash
+   pip install -e .
+   ```
+   
+   Or alternatively, use the minimal requirements file:
+   ```bash
+   pip install -r requirements-minimal.txt
+   ```
+
+This lightweight installation includes all core dependencies (numpy, einops, transformers, etc.) but excludes the optional CUDA-heavy performance optimizations below.
+
+### Full Installation (For Maximum Performance)
+
+For optimal performance with Flash Attention and Flash FFT Conv optimizations:
+
+1. Install PyTorch with CUDA support:
+    ```bash
+    pip install torch --index-url https://download.pytorch.org/whl/cu124
+    ```
+
+2. Install core dependencies:
    ```bash
    pip install -e .
    ```
 
-2. Install Flash Attention:
+3. Install Flash Attention (optional):
    ```bash
    MAX_JOBS=4 pip install flash-attn --no-build-isolation
    ```
 
-3. Install Flash FFT:
+4. Install Flash FFT Conv (optional):
    ```bash
     pip install git+https://github.com/HazyResearch/flash-fft-conv.git#subdirectory=csrc/flashfftconv
     pip install git+https://github.com/HazyResearch/flash-fft-conv.git
     ```
 
-Or from source:
+### Install from Source
+
+Or install directly from GitHub:
+```bash
+pip install git+https://github.com/hazan-lab/flash-stu-2.git
 ```
-pip install git+https://github.com/windsornguyen/flash-stu.git
-```
+
+> **Note**: Installing from source will only install the lightweight version. For full performance, manually install Flash Attention and Flash FFT Conv as shown above.
 
 ## Usage
 
@@ -148,9 +177,15 @@ See the [LICENSE](LICENSE) file for more details.
 
 ## Acknowledgments
 
+### Flash STU Paper Authors
+- Y. Isabel Liu, Windsor Nguyen, Yagiz Devre, Evan Dogariu, Anirudha Majumdar, Elad Hazan
+
+### Flash-STU-2 Implementation Contributors
+- Kia Ghods, Hubert Strauss 
+
+### Additional Thanks
 Special thanks to (in no particular order):
 - Elad Hazan and the authors of the [Spectral State Space Models](https://arxiv.org/abs/2312.06837) paper
-- Isabel Liu, Yagiz Devre, Evan Dogariu
 - The Flash Attention team
 - The Flash FFT team
 - The PyTorch team

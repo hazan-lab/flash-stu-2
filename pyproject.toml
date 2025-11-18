@@ -61,7 +61,7 @@ packages = ["flash_stu"]
 # ===============================
 [project.urls]
 Homepage = "https://arxiv.org/abs/2409.10489"
-Repository = "https://github.com/windsornguyen/flash-stu"
+Repository = "https://github.com/hazan-lab/flash-stu-2"
 
 # ===============================
 # Ruff Configuration
