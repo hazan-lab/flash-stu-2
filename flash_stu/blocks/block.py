@@ -125,17 +125,20 @@ class FlashSTUBlock(nn.Module):
             self.layer = STULayer(self.config, self.phi, self.n)
             
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, past_key_value=None, use_cache=False):
         """
         Forward pass through the block. 
 
         Args: 
             x: Input tensor of shape [batch_size, seq_len, d_model]
+            past_key_value: Optional cached key/value for attention layers
+            use_cache: Whether to return key/value cache (attention layers only)
         
         Returns: 
-            Output tensor of shape [batch_size, seq_len, d_model]
+            If use_cache=False: Output tensor of shape [batch_size, seq_len, d_model]
+            If use_cache=True: (output tensor, present_key_value) for attention layers
         """
-        return self.layer(x)
+        return self.layer(x, past_key_value=past_key_value, use_cache=use_cache)
 
     @property
     def is_attention_block(self) -> bool:

@@ -8,23 +8,33 @@
 1. [Introduction](#introduction)
 2. [Features](#features)
 3. [Installation](#installation)
-4. [Usage](#usage)
-5. [Configuration](#configuration)
-6. [Contributing](#contributing)
-7. [License](#license)
-8. [Acknowledgments](#acknowledgments)
+4. [Quick Start](#quick-start)
+5. [Usage Examples](#usage-examples)
+6. [Configuration](#configuration)
+7. [Training](#training)
+8. [Contributing](#contributing)
+9. [License](#license)
+10. [Acknowledgments](#acknowledgments)
 
 ## Introduction
 
 This repository complements the [Flash STU: Fast Spectral Transform Units](https://arxiv.org/abs/2409.10489) paper and contains an optimized, open-source PyTorch implementation of the Spectral Transform Unit (STU) as proposed in [*Spectral State Space Models*](https://arxiv.org/abs/2312.06837) by Agarwal et al. (2024).
 
-The [STU](stu.py) module is a fast and flexible building block that can be adapted into a wide range of neural network architectures, especially those that aim to solve tasks with long-range dependencies.
+Flash STU is a hybrid architecture that interleaves spectral state space model layers with sliding window attention, enabling scalability to billions of parameters for language modeling while maintaining near-linear time complexity. The STU module is a fast and flexible building block that can be adapted into a wide range of neural network architectures, especially those that aim to solve tasks with long-range dependencies.
 
 ## Features
 
-- ⚡️ Fast convolutions using [Flash FFT](https://github.com/HazyResearch/flash-fft-conv)
-- 🚀 Fast, local attention using (sliding window) [Flash Attention](https://github.com/Dao-AILab/flash-attention)
-- 🌐 Support for distributed training using [DDP](https://pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html) and [FSDP](https://pytorch.org/docs/stable/fsdp.html)
+- ⚡️ **Hybrid Architecture**: Interleaves STU and sliding window attention layers
+- 🚀 **Fast Convolutions**: Optimized spectral convolutions using [Flash FFT](https://github.com/HazyResearch/flash-fft-conv)
+- 💨 **Efficient Attention**: Sliding window attention using [Flash Attention 2](https://github.com/Dao-AILab/flash-attention)
+- 🔧 **HuggingFace Compatible**: Fully compatible with HuggingFace `transformers` API
+- 🎯 **Advanced Features**: 
+  - KV caching for generation
+  - Gradient checkpointing
+  - STU MLP sandwiching
+  - Memory-efficient tiling
+- 🌐 **Distributed Training**: Support for [DDP](https://pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html) and [FSDP](https://pytorch.org/docs/stable/fsdp.html)
+- 📦 **Flexible Building Blocks**: Use standalone `FlashSTUBlock` in your own architectures
 
 ## Installation
 
@@ -93,38 +103,210 @@ pip install git+https://github.com/hazan-lab/flash-stu-2.git
 
 > **Note**: Installing from source will only install the lightweight version. For full performance, manually install Flash Attention and Flash FFT Conv as shown above.
 
-## Usage
+## Quick Start
 
-### Using Flash STU
-
-Here is an example of how to import and use Flash STU:
-``` python
-from flash_stu import FlashSTU, FlashSTUConfig, get_spectral_filters
+```python
 import torch
+from flash_stu import FlashSTU, FlashSTUConfig
 
-device = torch.device('cuda') # Flash STU requires CUDA
-
+# Create configuration
 config = FlashSTUConfig(
-   MODIFY_YOUR_ARGS_HERE,
+    n_embd=512,
+    n_layers=12,
+    n_heads=8,
+    seq_len=2048,
+    vocab_size=50257,
 )
 
-phi = get_spectral_filters(
-   config.seq_len, 
-   config.num_eigh, 
-   config.use_hankel_L, 
-   device, 
-   config.torch_dtype
-)
+# Initialize model (spectral filters computed automatically)
+model = FlashSTU(config).cuda()
 
-model = FlashSTU(
-   config, 
-   phi
-)
+# Forward pass (HuggingFace compatible)
+input_ids = torch.randint(0, config.vocab_size, (2, 128)).cuda()
+outputs = model(input_ids=input_ids)
 
-y = model(x)
+# Generate text
+generated = model.generate(
+    input_ids=input_ids[:, :10],
+    max_length=50,
+    temperature=0.8,
+    top_k=40,
+)
 ```
 
-### Training
+## Usage Examples
+
+### 1. Basic Language Modeling
+
+```python
+from flash_stu import FlashSTU, FlashSTUConfig
+
+# Configure model
+config = FlashSTUConfig(
+    n_embd=768,
+    n_layers=12,
+    n_heads=12,
+    seq_len=2048,
+    vocab_size=50257,
+    window_size=512,  # Sliding window size
+    num_eigh=24,      # Number of spectral filters
+)
+
+# Create model
+model = FlashSTU(config).cuda()
+
+# Training loop
+input_ids = torch.randint(0, config.vocab_size, (4, 512)).cuda()
+labels = input_ids.clone()
+
+outputs = model(input_ids=input_ids, labels=labels)
+loss = outputs['loss']
+loss.backward()
+```
+
+### 2. Using Standalone STU Block
+
+```python
+from flash_stu import FlashSTUBlock
+
+# Create standalone STU block
+stu_block = FlashSTUBlock(
+    d_model=512,
+    sequence_length=2048,
+    num_filters=24,
+    use_attention=False,  # Pure STU, no attention
+).cuda()
+
+# Use in your own architecture
+x = torch.randn(2, 2048, 512).cuda()
+output = stu_block(x)
+```
+
+### 3. Alternating STU and Attention Layers
+
+```python
+from flash_stu import FlashSTUBlock
+import torch.nn as nn
+
+class HybridModel(nn.Module):
+    def __init__(self, d_model=512, n_layers=12):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            FlashSTUBlock(
+                d_model=d_model,
+                sequence_length=2048,
+                num_filters=24,
+                use_attention=(i % 2 == 1),  # Alternate STU and Attention
+            )
+            for i in range(n_layers)
+        ])
+    
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x, use_cache=False)
+        return x
+```
+
+### 4. STU with MLP Sandwiching
+
+```python
+# Enable sandwiching for better expressiveness
+config = FlashSTUConfig(
+    n_embd=512,
+    n_layers=12,
+    stu_enable_mlp_sandwich=True,
+    stu_mlp_hidden_size=2048,  # Sandwich MLP hidden size
+)
+
+model = FlashSTU(config).cuda()
+```
+
+### 5. Save and Load Model
+
+```python
+# Save model
+model.save_pretrained("./my_flash_stu_model")
+
+# Load model
+from flash_stu import FlashSTU
+model = FlashSTU.from_pretrained("./my_flash_stu_model").cuda()
+
+# Generate
+input_ids = torch.randint(0, config.vocab_size, (1, 10)).cuda()
+output = model.generate(input_ids, max_length=100)
+```
+
+### 6. Memory-Efficient Tiling
+
+```python
+# Use tiling for large models with limited memory
+config = FlashSTUConfig(
+    n_embd=2048,
+    n_layers=24,
+    use_approx=True,     # Required for tiling
+    d_in_tile=512,       # Tile input dimension
+    d_out_tile=512,      # Tile output dimension
+)
+
+model = FlashSTU(config).cuda()
+```
+
+## Configuration
+
+### Key Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `n_embd` | int | 1536 | Embedding/hidden dimension |
+| `n_layers` | int | 26 | Total number of layers |
+| `n_heads` | int | 8 | Number of attention heads |
+| `seq_len` | int | 8192 | Maximum sequence length |
+| `window_size` | int/tuple | 1024 | Sliding window size for attention |
+| `num_eigh` | int | 24 | Number of spectral filters for STU |
+| `vocab_size` | int | 200064 | Vocabulary size |
+| `use_hankel_L` | bool | False | Use Hankel-L (single branch) formulation |
+| `use_approx` | bool | True | Use approx mode (~50x fewer STU params, recommended) |
+| `use_flash_fft` | bool | True | Use Flash FFT for convolutions |
+| `stu_enable_mlp_sandwich` | bool | False | Enable MLP sandwiching for STU |
+| `torch_dtype` | dtype | bfloat16 | Model parameter dtype |
+
+### Example Configurations
+
+**Small Model (125M parameters)**:
+```python
+config = FlashSTUConfig(
+    n_embd=768,
+    n_layers=12,
+    n_heads=12,
+    seq_len=2048,
+    num_eigh=24,
+)
+```
+
+**Medium Model (350M parameters)**:
+```python
+config = FlashSTUConfig(
+    n_embd=1024,
+    n_layers=24,
+    n_heads=16,
+    seq_len=4096,
+    num_eigh=32,
+)
+```
+
+**Large Model (1B+ parameters)**:
+```python
+config = FlashSTUConfig(
+    n_embd=2048,
+    n_layers=32,
+    n_heads=32,
+    seq_len=8192,
+    num_eigh=48,
+    use_gradient_checkpointing=True,  # Save memory
+)
+```
+
+## Training
 
 An example LLM pretraining script is provided in [`example.py`](training/example.py) for you to test out the repository.
 
@@ -152,7 +334,6 @@ sbatch job.slurm
 Model configurations can be adjusted as needed in [`config.json`](training/config.json). Be sure to adjust the configurations of the [Slurm job](training/job.slurm) based on your cluster's constraints.
 
 > **Note**: PyTorch's `torch.compile` currently does not have great support for distributed wrapper modules like DDP or FSDP. If you encounter errors during training, try disabling `torch.compile`. For more information on `torch.compile`, see this [informal manual](https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.ivdr7fmrbeab).
-
 
 ## Contributing
 

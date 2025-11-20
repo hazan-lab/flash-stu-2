@@ -93,7 +93,7 @@ class Attention(nn.Module):
             v,
             dropout_p=self.dropout if self.training else 0.0,
             causal=True,
-            window_size=(self.window_size, 0),
+            window_size=self.window_size if isinstance(self.window_size, tuple) else (self.window_size, 0),
             alibi_slopes=self.alibi_slopes,  # https://arxiv.org/pdf/2108.12409
             softcap=self.softcap,  # https://arxiv.org/pdf/2408.00118
         )
