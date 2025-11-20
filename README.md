@@ -10,11 +10,12 @@
 3. [Installation](#installation)
 4. [Quick Start](#quick-start)
 5. [Usage Examples](#usage-examples)
-6. [Configuration](#configuration)
-7. [Training](#training)
-8. [Contributing](#contributing)
-9. [License](#license)
-10. [Acknowledgments](#acknowledgments)
+6. [MiniSTU](#ministu)
+7. [Configuration](#configuration)
+8. [Training](#training)
+9. [Contributing](#contributing)
+10. [License](#license)
+11. [Acknowledgments](#acknowledgments)
 
 ## Introduction
 
@@ -251,6 +252,41 @@ config = FlashSTUConfig(
 model = FlashSTU(config).cuda()
 ```
 
+## MiniSTU
+
+For research and experimentation with the core spectral filtering innovation, we provide **MiniSTU**: a lightweight, standalone implementation focused on learning linear dynamical systems.
+
+### Features
+
+- 🎯 **Core STU Only**: Pure spectral transform without attention/transformer layers
+- 📦 **Minimal Dependencies**: Just PyTorch + NumPy
+- 🧪 **LDS Learning**: Built-in utilities for learning dynamical systems
+- 📚 **Educational**: Clean, well-documented code for understanding STU
+
+### Quick Example
+
+```python
+from mini_stu import MiniSTU, random_LDS, train_stu_on_lds
+
+# Create a random linear dynamical system
+lds = random_LDS(state_dim=20, input_dim=10, output_dim=5)
+
+# Train MiniSTU to approximate it
+stu, losses = train_stu_on_lds(
+    lds,
+    seq_len=128,
+    num_filters=24,
+    num_steps=1000,
+)
+
+# Use the trained model
+import torch
+x = torch.randn(1, 128, 10)
+y = stu(x)  # Shape: [1, 128, 5]
+```
+
+See [`mini_stu/README.md`](mini_stu/README.md) for complete documentation and [`examples/mini_stu_example.py`](examples/mini_stu_example.py) for a full working example.
+
 ## Configuration
 
 ### Key Parameters
@@ -376,7 +412,7 @@ Special thanks to (in no particular order):
 ## Citation
 
 If you use this repository, or otherwise find our work valuable, please cite Flash STU:
-```
+```bibtex
 @article{flashstu,
   title={Flash STU: Fast Spectral Transform Units},
   author={Y. Isabel Liu, Windsor Nguyen, Yagiz Devre, Evan Dogariu, Anirudha Majumdar, Elad Hazan},
@@ -384,3 +420,4 @@ If you use this repository, or otherwise find our work valuable, please cite Fla
   year={2024},
   url={https://arxiv.org/abs/2409.10489}
 }
+```
