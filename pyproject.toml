@@ -1,6 +1,6 @@
 [project]
 name = "flash-stu"
-version = "1.0.0"
+version = "2.0.0"
 description = "An optimized, open-source PyTorch implementation of the Spectral Transform Unit (STU)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,7 +16,7 @@ authors = [
 ]
 
 maintainers = [
-    { name = "Windsor Nguyen", email = "windsor@princetonalignment.org" }
+    { name = "Kia Ghods", email = "kia.ghods@princeton.edu" },
 ]
 
 keywords = [
@@ -54,7 +54,7 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["flash_stu"]
+packages = ["flash_stu", "mini_stu"]
 
 # ===============================
 # Project URLs
