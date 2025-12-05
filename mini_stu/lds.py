@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from .stu import MiniSTU
+from .preconditioning import chebyshev_monic_coeffs, precondition_sequence
 
 
 class LDS(nn.Module):
@@ -150,6 +151,9 @@ def train_stu_on_lds(
     mlp_num_layers: int = 2,
     mlp_dropout: float = 0.0,
     mlp_activation: str = 'relu',
+    use_preconditioner: bool = False,
+    preconditioner_degree: int = 0,
+    preconditioner_coeffs: torch.Tensor | None = None,
 ) -> tuple[MiniSTU, list]:
     """
     Train a MiniSTU to approximate an LDS.
@@ -189,6 +193,21 @@ def train_stu_on_lds(
         mlp_activation=mlp_activation,
     ).to(lds.device)
     
+    # build preconditioner coefficients (USP-style)
+    if use_preconditioner:
+        if preconditioner_coeffs is not None:
+            c = preconditioner_coeffs.to(device=lds.device, dtype=lds.dtype)
+        else:
+            if preconditioner_degree < 0:
+                raise ValueError("preconditioner_degree must be >= 0")
+            c = chebyshev_monic_coeffs(
+                degree=preconditioner_degree,
+                device=lds.device,
+                dtype=lds.dtype,
+            )
+    else:
+        c = None
+    
     # Setup training
     optimizer = torch.optim.Adam(stu.parameters(), lr=learning_rate)
     losses = []
@@ -209,6 +228,10 @@ def train_stu_on_lds(
         
         # STU forward pass
         outputs = stu(inputs)
+
+        if use_preconditioner:
+            targets = precondition_sequence(targets, c)
+            outputs = precondition_sequence(outputs, c)
         
         # Compute loss
         loss = F.mse_loss(outputs, targets)

@@ -10,6 +10,7 @@ from .filters import get_spectral_filters, get_hankel
 from .convolution import convolve
 from .lds import LDS, random_LDS, train_stu_on_lds
 from .utils import nearest_power_of_two
+from .preconditioning import chebyshev_monic_coeffs, precondition_sequence
 
 __version__ = "1.0.0"
 
@@ -22,5 +23,7 @@ __all__ = [
     "random_LDS",
     "train_stu_on_lds",
     "nearest_power_of_two",
+    "chebyshev_monic_coeffs",
+    "precondition_sequence",
 ]
 

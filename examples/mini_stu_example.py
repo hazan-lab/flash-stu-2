@@ -72,7 +72,7 @@ def main():
         num_steps=num_steps,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        verbose=True
+        verbose=True,
     )
     
     print(f"\nSTU parameters: {stu.get_num_params()}")
