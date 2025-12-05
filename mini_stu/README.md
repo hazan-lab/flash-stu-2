@@ -8,7 +8,6 @@ A simplified, standalone implementation of the Spectral Transform Unit (STU) foc
 - 🎯 **LDS Learning**: Built-in support for learning linear dynamical systems
 - 🧪 **Research-Friendly**: Clean, understandable code for experimentation
 - 📦 **Lightweight**: Minimal dependencies (PyTorch + NumPy only)
-- 🚀 **Production-Ready**: Well-documented, tested, and optimized
 
 ## Installation
 
@@ -52,7 +51,7 @@ print(f"MSE: {torch.mean((stu_output - lds_output)**2):.6f}")
 ```python
 from mini_stu import MiniSTU
 
-# Create STU
+# Create STU without MLP (default)
 stu = MiniSTU(
     seq_len=128,
     num_filters=24,
@@ -63,6 +62,30 @@ stu = MiniSTU(
 # Forward pass
 x = torch.randn(4, 128, 10)  # batch of 4 sequences
 y = stu(x)
+print(y.shape)  # torch.Size([4, 128, 5])
+```
+
+### Use MiniSTU with Optional MLP
+
+```python
+from mini_stu import MiniSTU
+
+# Create STU with MLP for non-linear transformations
+stu = MiniSTU(
+    seq_len=128,
+    num_filters=24,
+    input_dim=10,
+    output_dim=5,
+    use_mlp=True,              # Enable MLP
+    mlp_hidden_dim=20,         # Hidden dimension (default: output_dim * 2)
+    mlp_num_layers=2,          # Number of MLP layers
+    mlp_dropout=0.1,           # Dropout rate
+    mlp_activation='gelu',     # Activation: 'relu', 'gelu', or 'tanh'
+)
+
+# Forward pass
+x = torch.randn(4, 128, 10)
+y = stu(x)  # MLP is applied after spectral transform
 print(y.shape)  # torch.Size([4, 128, 5])
 ```
 
@@ -90,6 +113,11 @@ MiniSTU(
     input_dim: int,            # Input feature dimension
     output_dim: int,           # Output feature dimension
     use_hankel_L: bool = False, # Use Hankel-L (faster, single branch)
+    use_mlp: bool = False,     # Enable MLP after spectral transform
+    mlp_hidden_dim: int = None, # MLP hidden dimension (default: output_dim * 2)
+    mlp_num_layers: int = 2,   # Number of MLP layers
+    mlp_dropout: float = 0.0,  # Dropout rate for MLP
+    mlp_activation: str = 'relu', # Activation: 'relu', 'gelu', or 'tanh'
     dtype: torch.dtype = torch.float32,
     device: torch.device = None,
     precomputed_filters: torch.Tensor = None,
@@ -139,6 +167,11 @@ train_stu_on_lds(
     batch_size: int = 32,
     learning_rate: float = 1e-3,
     verbose: bool = True,
+    use_mlp: bool = False,     # Enable MLP in trained STU
+    mlp_hidden_dim: int = None, # MLP hidden dimension
+    mlp_num_layers: int = 2,   # Number of MLP layers
+    mlp_dropout: float = 0.0,  # Dropout rate for MLP
+    mlp_activation: str = 'relu', # Activation function
 ) -> tuple[MiniSTU, list]  # (trained_stu, loss_history)
 ```
 

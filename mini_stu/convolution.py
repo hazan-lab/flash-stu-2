@@ -31,18 +31,21 @@ def convolve(
     bsz, seq_len, d_in = u.shape
     _, K = v.shape
     
+    # Preserve input dtype for all operations
+    dtype = u.dtype
+    
     # Create sign alternation pattern for negative frequencies
-    sgn = torch.full((1, seq_len, 1), 1, device=u.device)
+    sgn = torch.full((1, seq_len, 1), 1, device=u.device, dtype=dtype)
     sgn[:, 1::2] *= -1
     
     if use_approx:
         # Approximation mode (less common)
         _, d_out = v.shape
-        v = v.view(1, -1, d_out, 1).to(torch.float32).contiguous()
+        v = v.view(1, -1, d_out, 1).to(dtype=dtype).contiguous()
     else:
         # Standard mode
         sgn = sgn.unsqueeze(-1)
-        v = v.view(1, -1, K, 1, 1).to(torch.float32).contiguous()
+        v = v.view(1, -1, K, 1, 1).to(dtype=dtype).contiguous()
     
     # Expand u to match filter dimensions: [bsz, seq_len, K, d_in]
     u = u.view(bsz, -1, 1, d_in).expand(bsz, -1, K, d_in)
@@ -51,7 +54,7 @@ def convolve(
     v = torch.fft.rfft(v, n=n, dim=1)
     
     # Create positive and negative frequency versions of input
-    U = torch.stack([u, u * sgn], dim=-1).to(torch.float32).contiguous()
+    U = torch.stack([u, u * sgn], dim=-1).to(dtype=dtype).contiguous()
     
     # FFT of input
     U = torch.fft.rfft(U, n=n, dim=1)

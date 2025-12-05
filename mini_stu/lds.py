@@ -144,7 +144,12 @@ def train_stu_on_lds(
     num_steps: int = 1000,
     batch_size: int = 32,
     learning_rate: float = 1e-3,
-    verbose: bool = True
+    verbose: bool = True,
+    use_mlp: bool = False,
+    mlp_hidden_dim: int = None,
+    mlp_num_layers: int = 2,
+    mlp_dropout: float = 0.0,
+    mlp_activation: str = 'relu',
 ) -> tuple[MiniSTU, list]:
     """
     Train a MiniSTU to approximate an LDS.
@@ -160,6 +165,11 @@ def train_stu_on_lds(
         batch_size: Batch size for training
         learning_rate: Learning rate for optimizer
         verbose: If True, show progress bar and periodic loss
+        use_mlp: If True, apply an MLP after the spectral transform.
+        mlp_hidden_dim: Hidden dimension for the MLP (default: output_dim * 2).
+        mlp_num_layers: Number of layers in the MLP (default: 2).
+        mlp_dropout: Dropout rate for the MLP (default: 0.0).
+        mlp_activation: Activation function for the MLP (default: 'relu').
         
     Returns:
         Tuple of (trained_stu, loss_history)
@@ -171,7 +181,12 @@ def train_stu_on_lds(
         input_dim=lds.input_dim,
         output_dim=lds.output_dim,
         device=lds.device,
-        dtype=lds.dtype
+        dtype=lds.dtype,
+        use_mlp=use_mlp,
+        mlp_hidden_dim=mlp_hidden_dim,
+        mlp_num_layers=mlp_num_layers,
+        mlp_dropout=mlp_dropout,
+        mlp_activation=mlp_activation,
     ).to(lds.device)
     
     # Setup training

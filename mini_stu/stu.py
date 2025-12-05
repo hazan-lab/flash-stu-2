@@ -19,6 +19,7 @@ class MiniSTU(nn.Module):
     1. Spectral convolution with learned filters
     2. Projection through learned matrices (Φ⁺, Φ⁻)
     3. Combination of positive and negative frequency branches
+    4. Optional MLP for non-linear transformation
     
     Args:
         seq_len: Maximum sequence length
@@ -27,6 +28,11 @@ class MiniSTU(nn.Module):
         output_dim: Output feature dimension
         use_hankel_L: If True, use single-branch Hankel-L (faster).
                      If False, use two-branch standard Hankel (more expressive).
+        use_mlp: If True, apply an MLP after the spectral transform.
+        mlp_hidden_dim: Hidden dimension for the MLP (default: output_dim * 2).
+        mlp_num_layers: Number of layers in the MLP (default: 2).
+        mlp_dropout: Dropout rate for the MLP (default: 0.0).
+        mlp_activation: Activation function for the MLP (default: 'relu').
         dtype: Data type for parameters
         device: Device to place module on
         precomputed_filters: Optional pre-computed spectral filters [seq_len, num_filters].
@@ -44,6 +50,11 @@ class MiniSTU(nn.Module):
         input_dim: int,
         output_dim: int,
         use_hankel_L: bool = False,
+        use_mlp: bool = False,
+        mlp_hidden_dim: int = None,
+        mlp_num_layers: int = 2,
+        mlp_dropout: float = 0.0,
+        mlp_activation: str = 'relu',
         dtype: torch.dtype = torch.float32,
         device: torch.device = None,
         precomputed_filters: torch.Tensor = None,
@@ -55,6 +66,7 @@ class MiniSTU(nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.use_hankel_L = use_hankel_L
+        self.use_mlp = use_mlp
         self.dtype = dtype
         self.device = device or torch.device("cpu")
         
@@ -84,6 +96,49 @@ class MiniSTU(nn.Module):
             self.M_phi_minus = nn.Parameter(
                 torch.randn(num_filters, input_dim, output_dim, dtype=dtype, device=self.device) * scale
             )
+        
+        # Optional MLP for non-linear transformation
+        if use_mlp:
+            if mlp_hidden_dim is None:
+                mlp_hidden_dim = output_dim * 2
+            
+            # Build MLP layers
+            mlp_layers = []
+            mlp_input_dim = output_dim  # MLP operates on the output of spectral transform
+            
+            for i in range(mlp_num_layers):
+                if mlp_num_layers == 1:
+                    # Single layer: output_dim -> output_dim (just a linear projection)
+                    mlp_layers.append(nn.Linear(mlp_input_dim, output_dim, dtype=dtype, device=self.device))
+                    break  # No activation for single layer
+                elif i == 0:
+                    # First layer: output_dim -> mlp_hidden_dim
+                    mlp_layers.append(nn.Linear(mlp_input_dim, mlp_hidden_dim, dtype=dtype, device=self.device))
+                elif i == mlp_num_layers - 1:
+                    # Last layer: mlp_hidden_dim -> output_dim
+                    mlp_layers.append(nn.Linear(mlp_hidden_dim, output_dim, dtype=dtype, device=self.device))
+                else:
+                    # Middle layers: mlp_hidden_dim -> mlp_hidden_dim
+                    mlp_layers.append(nn.Linear(mlp_hidden_dim, mlp_hidden_dim, dtype=dtype, device=self.device))
+                
+                # Add activation (except for last layer)
+                if i < mlp_num_layers - 1:
+                    if mlp_activation.lower() == 'relu':
+                        mlp_layers.append(nn.ReLU())
+                    elif mlp_activation.lower() == 'gelu':
+                        mlp_layers.append(nn.GELU())
+                    elif mlp_activation.lower() == 'tanh':
+                        mlp_layers.append(nn.Tanh())
+                    else:
+                        raise ValueError(f"Unsupported activation: {mlp_activation}")
+                    
+                    # Add dropout if specified
+                    if mlp_dropout > 0.0:
+                        mlp_layers.append(nn.Dropout(mlp_dropout))
+            
+            self.mlp = nn.Sequential(*mlp_layers)
+        else:
+            self.mlp = None
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -115,11 +170,17 @@ class MiniSTU(nn.Module):
         
         if self.use_hankel_L:
             # Single branch (Hankel-L)
-            return spectral_plus
+            output = spectral_plus
+        else:
+            # Two branches (standard Hankel)
+            spectral_minus = torch.einsum('blki,kio->blo', U_minus, self.M_phi_minus)
+            output = spectral_plus + spectral_minus
         
-        # Two branches (standard Hankel)
-        spectral_minus = torch.einsum('blki,kio->blo', U_minus, self.M_phi_minus)
-        return spectral_plus + spectral_minus
+        # Apply optional MLP
+        if self.mlp is not None:
+            output = self.mlp(output)
+        
+        return output
     
     def get_num_params(self) -> int:
         """Return the number of learnable parameters."""
