@@ -25,6 +25,33 @@ class STU(nn.Module):
             if config.use_flash_fft and flash_fft_available
             else None
         )
+
+        # Pre-compute and cache sign alternation tensors (avoids re-creation every forward call)
+        seq_len = phi.shape[0]
+        sgn = torch.full((1, seq_len, 1), 1, device=phi.device)
+        sgn[:, 1::2] *= -1
+        self.register_buffer('sgn', sgn, persistent=False)
+
+        if self.flash_fft:
+            from flash_stu.utils.numerics import nearest_power_of_two
+            padded_len = nearest_power_of_two(seq_len, round_up=True)
+            flash_sgn = torch.full((1, 1, padded_len), 1, device=phi.device)
+            flash_sgn[:, :, 1::2] = -1
+            self.register_buffer('flash_sgn', flash_sgn, persistent=False)
+
+        # Pre-compute FFT of filters for non-approx mode (phi is fixed)
+        if not self.use_approx:
+            return_both = not self.use_hankel_L
+            if return_both:
+                phi_fft = torch.fft.rfft(
+                    phi.view(1, -1, self.K, 1, 1).to(torch.float32), n=n, dim=1
+                )
+            else:
+                phi_fft = torch.fft.rfft(
+                    phi.view(1, -1, self.K, 1).to(torch.float32), n=n, dim=1
+                )
+            self.register_buffer('phi_fft', phi_fft, persistent=False)
+
         if self.use_approx:
             self.M_inputs = nn.Parameter(
                 torch.empty(self.d_in, self.d_out, dtype=config.torch_dtype)
@@ -54,27 +81,33 @@ class STU(nn.Module):
     def _forward_standard(self, x: torch.Tensor) -> torch.Tensor:
         # Only compute both branches if we need them (standard Hankel)
         return_both = not self.use_hankel_L
-        
+
         if self.use_approx:
             # Contract inputs and filters over the K and d_in dimensions, then convolve
             x_proj = x @ self.M_inputs
             phi_proj = self.phi @ self.M_filters
             if self.flash_fft:
                 spectral_plus, spectral_minus = flash_convolve(
-                    x_proj, phi_proj, self.flash_fft, self.use_approx, return_both
+                    x_proj, phi_proj, self.flash_fft, self.use_approx, return_both,
+                    sgn=self.flash_sgn if return_both else None,
                 )
             else:
                 spectral_plus, spectral_minus = convolve(
-                    x_proj, phi_proj, self.n, self.use_approx, return_both
+                    x_proj, phi_proj, self.n, self.use_approx, return_both,
+                    sgn=self.sgn,
                 )
         else:
-            # Convolve inputs and filters,
+            # Convolve inputs and filters, using cached phi_fft
             if self.flash_fft:
                 U_plus, U_minus = flash_convolve(
-                    x, self.phi, self.flash_fft, self.use_approx, return_both
+                    x, self.phi, self.flash_fft, self.use_approx, return_both,
+                    sgn=self.flash_sgn if return_both else None,
                 )
             else:
-                U_plus, U_minus = convolve(x, self.phi, self.n, self.use_approx, return_both)
+                U_plus, U_minus = convolve(
+                    x, self.phi, self.n, self.use_approx, return_both,
+                    sgn=self.sgn, v_fft=self.phi_fft,
+                )
             # Then, contract over the K and d_in dimensions
             spectral_plus = torch.tensordot(
                 U_plus, self.M_phi_plus, dims=([2, 3], [0, 1])
@@ -123,13 +156,15 @@ class STU(nn.Module):
     ) -> torch.Tensor:
         if self.flash_fft:
             spectral_plus, spectral_minus = flash_convolve(
-                x_proj, phi_proj, self.flash_fft, self.use_approx, return_both
+                x_proj, phi_proj, self.flash_fft, self.use_approx, return_both,
+                sgn=self.flash_sgn if return_both else None,
             )
         else:
             spectral_plus, spectral_minus = convolve(
-                x_proj, phi_proj, self.n, self.use_approx, return_both
+                x_proj, phi_proj, self.n, self.use_approx, return_both,
+                sgn=self.sgn,
             )
-        
+
         return spectral_plus if not return_both else spectral_plus + spectral_minus
     
     def _tile_diagonal_blocks(

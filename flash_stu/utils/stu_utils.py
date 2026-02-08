@@ -192,49 +192,63 @@ def get_spectral_filters(
     phi *= sigma ** 0.25
     return torch.tensor(phi, device=device, dtype=dtype)
 
-def convolve(u: torch.Tensor, v: torch.Tensor, n: int, use_approx: bool = True, return_both: bool = True) -> tuple[torch.Tensor, torch.Tensor | None]:
+def convolve(
+    u: torch.Tensor, v: torch.Tensor, n: int,
+    use_approx: bool = True, return_both: bool = True,
+    sgn: Optional[torch.Tensor] = None,
+    v_fft: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     bsz, seq_len, d_in = u.shape
     input_dtype = u.dtype
 
-    sgn = torch.full((1, seq_len, 1), 1, device=u.device)
-    sgn[:, 1::2] *= -1
-    
+    if sgn is None:
+        sgn = torch.full((1, seq_len, 1), 1, device=u.device)
+        sgn[:, 1::2] *= -1
+
     if return_both:
         # Compute both branches (for standard Hankel)
         if use_approx:
-            _, d_out = v.shape
-            v = v.view(1, -1, d_out, 1).to(torch.float32)
+            if v_fft is None:
+                _, d_out = v.shape
+                v_fft = torch.fft.rfft(v.view(1, -1, d_out, 1).to(torch.float32), n=n, dim=1)
         else:
-            _, K = v.shape
-            sgn = sgn.unsqueeze(-1)
-            v = v.view(1, -1, K, 1, 1).to(torch.float32) # (bsz, seq_len, K, d_in, stack)
+            sgn = sgn.unsqueeze(-1) if sgn.dim() == 3 else sgn
+            if v_fft is None:
+                _, K = v.shape
+                v_fft = torch.fft.rfft(v.view(1, -1, K, 1, 1).to(torch.float32), n=n, dim=1)
+            else:
+                _, K = v.shape
             u = u.view(bsz, -1, 1, d_in).expand(bsz, -1, K, d_in)
 
-        v = torch.fft.rfft(v, n=n, dim=1)
         U = torch.stack([u, u * sgn], dim=-1).to(torch.float32)
         U = torch.fft.rfft(U, n=n, dim=1)
-        U_conv = torch.fft.irfft(v * U, n=n, dim=1)[:, :seq_len]
+        U_conv = torch.fft.irfft(v_fft * U, n=n, dim=1)[:, :seq_len]
         U_plus, U_minus = torch.unbind(U_conv, dim=-1)
         U_minus = U_minus * sgn
         return U_plus.to(input_dtype), U_minus.to(input_dtype)
     else:
         # Only compute plus branch (for Hankel-L)
         if use_approx:
-            _, d_out = v.shape
-            v = v.view(1, -1, d_out).to(torch.float32)  # No stack dimension
+            if v_fft is None:
+                _, d_out = v.shape
+                v_fft = torch.fft.rfft(v.view(1, -1, d_out).to(torch.float32), n=n, dim=1)
         else:
-            _, K = v.shape
-            v = v.view(1, -1, K, 1).to(torch.float32)  # (bsz, seq_len, K, d_in) - no stack dimension
+            if v_fft is None:
+                _, K = v.shape
+                v_fft = torch.fft.rfft(v.view(1, -1, K, 1).to(torch.float32), n=n, dim=1)
+            else:
+                _, K = v.shape
             u = u.view(bsz, -1, 1, d_in).expand(bsz, -1, K, d_in)
 
-        v = torch.fft.rfft(v, n=n, dim=1)
         U = u.to(torch.float32)
         U = torch.fft.rfft(U, n=n, dim=1)
-        U_plus = torch.fft.irfft(v * U, n=n, dim=1)[:, :seq_len]
+        U_plus = torch.fft.irfft(v_fft * U, n=n, dim=1)[:, :seq_len]
         return U_plus.to(input_dtype), None
 
 def flash_convolve(
-    u: torch.Tensor, v: torch.Tensor, flash_fft: FlashFFTConv, use_approx: bool = True, return_both: bool = True
+    u: torch.Tensor, v: torch.Tensor, flash_fft: FlashFFTConv,
+    use_approx: bool = True, return_both: bool = True,
+    sgn: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     bsz, seq_len, d_in = u.shape
     _, K = v.shape
@@ -244,8 +258,9 @@ def flash_convolve(
 
     if return_both:
         # Compute both branches (for standard Hankel)
-        sgn = torch.full((1, 1, padded_len), 1, device=u.device)
-        sgn[:, :, 1::2] = -1
+        if sgn is None:
+            sgn = torch.full((1, 1, padded_len), 1, device=u.device)
+            sgn[:, :, 1::2] = -1
 
         if use_approx:
             u_padded = F.pad(u.transpose(1, 2), (0, pad_len)).to(torch.bfloat16).contiguous()

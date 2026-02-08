@@ -79,9 +79,22 @@ class MiniSTU(nn.Module):
                 seq_len, num_filters, use_hankel_L, self.device, self.dtype
             )
         self.register_buffer("phi", phi, persistent=False)
-        
+
         # FFT length for convolution
         self.n = nearest_power_of_two(seq_len * 2 - 1, round_up=True)
+
+        # Pre-compute and cache sign alternation tensor (avoids re-creation every forward call)
+        # Shape [1, seq_len, 1, 1] for standard mode (4D with extra dim for K expansion)
+        sgn = torch.full((1, seq_len, 1, 1), 1, device=self.device, dtype=dtype)
+        sgn[:, 1::2] *= -1
+        self.register_buffer("sgn", sgn, persistent=False)
+
+        # Pre-compute FFT of filters (phi is fixed, so this never changes)
+        phi_fft = torch.fft.rfft(
+            phi.view(1, -1, num_filters, 1, 1).to(dtype=dtype).contiguous(),
+            n=self.n, dim=1,
+        )
+        self.register_buffer("phi_fft", phi_fft, persistent=False)
         
         # Learnable projection matrices
         # Φ⁺: projects convolved features (positive branch) [num_filters, input_dim, output_dim]
@@ -162,7 +175,8 @@ class MiniSTU(nn.Module):
         
         # Spectral convolution: convolve input with spectral filters
         # U_plus, U_minus: [B, L, K, I]
-        U_plus, U_minus = convolve(x, self.phi, self.n, use_approx=False)
+        U_plus, U_minus = convolve(x, self.phi, self.n, use_approx=False,
+                                   sgn=self.sgn, v_fft=self.phi_fft)
         
         # Project convolved features through learned matrices
         # [B, L, K, I] ⊗ [K, I, O] -> [B, L, O]
