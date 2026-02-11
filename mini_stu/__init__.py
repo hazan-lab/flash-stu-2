@@ -7,7 +7,7 @@ perfect for learning dynamical systems and research applications.
 
 from .stu import MiniSTU
 from .filters import get_spectral_filters, get_hankel
-from .convolution import convolve
+from .convolution import convolve, flash_convolve
 from .lds import LDS, random_LDS, train_stu_on_lds
 from .utils import nearest_power_of_two
 
@@ -18,6 +18,7 @@ __all__ = [
     "get_spectral_filters",
     "get_hankel",
     "convolve",
+    "flash_convolve",
     "LDS",
     "random_LDS",
     "train_stu_on_lds",

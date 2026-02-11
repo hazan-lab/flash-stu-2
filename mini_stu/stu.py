@@ -2,8 +2,11 @@ import torch
 import torch.nn as nn
 
 from .filters import get_spectral_filters
-from .convolution import convolve
+from .convolution import convolve, flash_convolve, flash_fft_available
 from .utils import nearest_power_of_two
+
+if flash_fft_available:
+    from flashfftconv import FlashFFTConv
 
 
 class MiniSTU(nn.Module):
@@ -28,6 +31,7 @@ class MiniSTU(nn.Module):
         output_dim: Output feature dimension
         use_hankel_L: If True, use single-branch Hankel-L (faster).
                      If False, use two-branch standard Hankel (more expressive).
+        use_flash_fft: If True, use FlashFFTConv when available (default: True).
         use_mlp: If True, apply an MLP after the spectral transform.
         mlp_hidden_dim: Hidden dimension for the MLP (default: output_dim * 2).
         mlp_num_layers: Number of layers in the MLP (default: 2).
@@ -50,6 +54,7 @@ class MiniSTU(nn.Module):
         input_dim: int,
         output_dim: int,
         use_hankel_L: bool = False,
+        use_flash_fft: bool = True,
         use_mlp: bool = False,
         mlp_hidden_dim: int = None,
         mlp_num_layers: int = 2,
@@ -83,6 +88,18 @@ class MiniSTU(nn.Module):
         # FFT length for convolution
         self.n = nearest_power_of_two(seq_len * 2 - 1, round_up=True)
 
+        # FlashFFTConv setup (uses padded_len = nearest power of 2 of seq_len)
+        self.use_flash_fft = use_flash_fft and flash_fft_available
+        if self.use_flash_fft:
+            padded_len = nearest_power_of_two(seq_len, round_up=True)
+            self.flash_fft = FlashFFTConv(padded_len, dtype=torch.bfloat16).to(self.device)
+            # FlashFFTConv sign tensor: shape [1, 1, padded_len] (channel-last layout)
+            flash_sgn = torch.full((1, 1, padded_len), 1, device=self.device)
+            flash_sgn[:, :, 1::2] = -1
+            self.register_buffer("flash_sgn", flash_sgn, persistent=False)
+        else:
+            self.flash_fft = None
+
         # Pre-compute and cache sign alternation tensor (avoids re-creation every forward call)
         # Shape [1, seq_len, 1, 1] for standard mode (4D with extra dim for K expansion)
         sgn = torch.full((1, seq_len, 1, 1), 1, device=self.device, dtype=dtype)
@@ -90,8 +107,9 @@ class MiniSTU(nn.Module):
         self.register_buffer("sgn", sgn, persistent=False)
 
         # Pre-compute FFT of filters (phi is fixed, so this never changes)
+        # Only needed for vanilla FFT path; FFT requires float32
         phi_fft = torch.fft.rfft(
-            phi.view(1, -1, num_filters, 1, 1).to(dtype=dtype).contiguous(),
+            phi.view(1, -1, num_filters, 1, 1).to(dtype=torch.float32).contiguous(),
             n=self.n, dim=1,
         )
         self.register_buffer("phi_fft", phi_fft, persistent=False)
@@ -175,8 +193,16 @@ class MiniSTU(nn.Module):
         
         # Spectral convolution: convolve input with spectral filters
         # U_plus, U_minus: [B, L, K, I]
-        U_plus, U_minus = convolve(x, self.phi, self.n, use_approx=False,
-                                   sgn=self.sgn, v_fft=self.phi_fft)
+        return_both = not self.use_hankel_L
+        if self.flash_fft is not None:
+            U_plus, U_minus = flash_convolve(
+                x, self.phi, self.flash_fft,
+                sgn=self.flash_sgn if return_both else None,
+                return_both=return_both,
+            )
+        else:
+            U_plus, U_minus = convolve(x, self.phi, self.n, use_approx=False,
+                                       sgn=self.sgn, v_fft=self.phi_fft)
         
         # Project convolved features through learned matrices
         # [B, L, K, I] ⊗ [K, I, O] -> [B, L, O]
