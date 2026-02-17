@@ -47,6 +47,7 @@ class MiniSTU(nn.Module):
         - Output: [batch_size, seq_len, output_dim]
     """
     
+    
     def __init__(
         self,
         seq_len: int,
@@ -63,6 +64,7 @@ class MiniSTU(nn.Module):
         dtype: torch.dtype = torch.float32,
         device: torch.device = None,
         precomputed_filters: torch.Tensor = None,
+        backend: str = 'spectral',
     ):
         super().__init__()
         
@@ -74,7 +76,50 @@ class MiniSTU(nn.Module):
         self.use_mlp = use_mlp
         self.dtype = dtype
         self.device = device or torch.device("cpu")
+        self.backend = backend
         
+        if self.backend == 'lds':
+            assert not use_hankel_L, "LDS backend requires use_hankel_L=False"
+            assert num_filters == 24, "LDS backend requires num_filters=24"
+            
+            # Load pre-trained LDS parameters
+            from .MiniSTU_lds import FixedDiagonalLDS, DistillSTUFast
+            import os
+            
+            lds_path = os.path.join(os.path.dirname(__file__), "80_phi_lds.pt")
+            lds_data = torch.load(lds_path, map_location=self.device)['model_state_dict']
+            
+            # Initialize LDS. Keep A, B, h0 in float32 for stability in recurrence.
+            # C can be in target dtype (e.g. bfloat16) as it's a projection.
+            # Note: The file likely contains float64 or float32.
+            A = lds_data['A'].to(dtype=torch.float32, device=self.device)
+            B = lds_data['B'].to(dtype=torch.float32, device=self.device)
+            C = lds_data['C'].to(dtype=self.dtype, device=self.device)
+            h0 = lds_data['h0'].to(dtype=torch.float32, device=self.device)
+            
+            # B in file is [1, D], FixedDiagonalLDS expects [D]
+            # C in file is [D, 48], FixedDiagonalLDS expects [D, O_lds]
+            # Here O_lds is 48 (2*K), but we just feed it to FixedDiagonalLDS
+            
+            self.lds_module = FixedDiagonalLDS(A, B.flatten(), C, h0)
+            self.lds_module.precompute_scan_A(seq_len)
+            
+            # Initialize DistillSTUFast
+            # It expects K, but uses it to determine n_filters.
+            # In the notebook: n_filters = 2 * K (since hankel_L=False).
+            # The loaded C has output_dim=48, which matches 2*24.
+            
+            self.distill_stu = DistillSTUFast(
+                self.lds_module,
+                K=num_filters,
+                d_in=input_dim,
+                d_out=output_dim,
+                use_hankel_L=use_hankel_L,
+                dtype=self.dtype
+            ).to(self.device)
+            
+            return
+
         # Spectral filters: shape [seq_len, num_filters]
         # Register as buffer so it moves with .to(device)
         if precomputed_filters is not None:
@@ -189,7 +234,14 @@ class MiniSTU(nn.Module):
         B, L, I = x.shape
         
         # Ensure correct dtype
-        x = x.to(self.M_phi_plus.dtype)
+        # For LDS backend, dtype match is handled inside DistillSTUFast or earlier layers
+        if self.backend == 'spectral':
+             x = x.to(self.M_phi_plus.dtype)
+        else:
+             x = x.to(self.dtype)
+
+        if self.backend == 'lds':
+             return self.distill_stu(x)
         
         # Spectral convolution: convolve input with spectral filters
         # U_plus, U_minus: [B, L, K, I]
@@ -221,6 +273,7 @@ class MiniSTU(nn.Module):
             output = self.mlp(output)
         
         return output
+
     
     def get_num_params(self) -> int:
         """Return the number of learnable parameters."""
