@@ -86,7 +86,7 @@ class MiniSTU(nn.Module):
             from .stu_lds import FixedDiagonalLDS, DistillSTUFast
             import os
             
-            lds_path = os.path.join(os.path.dirname(__file__), "80_phi_lds.pt")
+            lds_path = os.path.join(os.path.dirname(__file__), "phi_lds.pt")
             lds_data = torch.load(lds_path, map_location=self.device)['model_state_dict']
             
             #this is later downcasted to self.dtype
