@@ -7,10 +7,96 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 try:
-    from .mamba_kernels import run_lds_scan
+    import triton
+    import triton.language as tl
     HAS_TRITON = True
 except ImportError:
     HAS_TRITON = False
+
+if HAS_TRITON:
+    @triton.jit
+    def lds_scan_kernel(
+        u_ptr,      # (B, L)
+        A_ptr,      # (D,)
+        B_ptr,      # (D,)
+        h0_ptr,     # (D,)
+        h_out_ptr,  # (B, L, D)  -- output states
+        
+        stride_u_b, stride_u_l,
+        stride_h_b, stride_h_l, stride_h_d,
+        
+        SEQ_LEN: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        D_SIZE: tl.constexpr,
+    ):
+        """
+        Computes h_t = A * h_{t-1} + B * u_t
+        Parallelized across Batch (pid_b) and Dimension chunks (pid_d).
+        Sequential across Sequence Length (L).
+        """
+        pid_b = tl.program_id(0)
+        pid_d = tl.program_id(1)
+        
+        # Cast offsets for 64-bit safety
+        pid_b_64 = pid_b.to(tl.int64)
+        # stride args are effectively integers during compilation if specialized, 
+        # so we don't call .to() on them. pid_b_64 * stride will promote to int64.
+        
+        # Offsets for D dimension
+        offs_d = pid_d * BLOCK_D + tl.arange(0, BLOCK_D)
+        mask_d = offs_d < D_SIZE
+        offs_d_64 = offs_d.to(tl.int64)
+
+        # Load A and B
+        a_vals = tl.load(A_ptr + offs_d_64, mask=mask_d, other=0.0).to(tl.float32)
+        b_vals = tl.load(B_ptr + offs_d_64, mask=mask_d, other=0.0).to(tl.float32)
+        
+        # Load Initial State h0
+        h_curr = tl.load(h0_ptr + offs_d_64, mask=mask_d, other=0.0).to(tl.float32)
+        
+        # Pointers setup
+        u_base_ptr = u_ptr + (pid_b_64 * stride_u_b)
+        h_out_base_ptr = h_out_ptr + (pid_b_64 * stride_h_b + offs_d_64 * stride_h_d)
+        
+        # Loop over sequence
+        for t in range(SEQ_LEN):
+            # 1. Update h
+            u_val = tl.load(u_base_ptr + t * stride_u_l).to(tl.float32)
+            h_curr = a_vals * h_curr + b_vals * u_val
+            
+            # Store h_curr to output
+            tl.store(h_out_base_ptr + t * stride_h_l, h_curr, mask=mask_d)
+
+    def run_lds_scan(u, A, B_vec, h0):
+        """
+        Args:
+            u: (B, L)
+            A: (D,)
+            B_vec: (D,)
+            h0: (D,)
+        Returns:
+            h: (B, L, D)
+        """
+        B_batch, L = u.shape
+        D = A.shape[0]
+        
+        h_out = torch.empty((B_batch, L, D), device=u.device, dtype=u.dtype)
+        
+        # Grid config
+        BLOCK_D = 1024
+        num_d_blocks = (D + BLOCK_D - 1) // BLOCK_D
+        grid = (B_batch, num_d_blocks)
+        
+        lds_scan_kernel[grid](
+            u, A, B_vec, h0, h_out,
+            u.stride(0), u.stride(1),
+            h_out.stride(0), h_out.stride(1), h_out.stride(2),
+            SEQ_LEN=L,
+            BLOCK_D=BLOCK_D,
+            D_SIZE=D
+        )
+        
+        return h_out
 
 
 # ============================================================
@@ -18,7 +104,7 @@ except ImportError:
 # ============================================================
 def affine_scan_inclusive(a: torch.Tensor, b: torch.Tensor):
     """
-    Differentiable Hillis–Steele inclusive scan for elementwise affine maps.
+    Differentiable Hillis-Steele inclusive scan for elementwise affine maps.
 
     Each timestep t represents: f_t(x) = a_t * x + b_t   (elementwise on last dim)
     Composition (later ∘ earlier):
@@ -155,10 +241,9 @@ class FixedDiagonalLDS(nn.Module):
             h0 = torch.zeros(D, device=A.device, dtype=A.dtype)
         assert h0.shape == (D,)
 
-        # Force A and B_vec to float32 to avoid precision issues in recurrence
-        # especially when running in bfloat16.
-        self.register_buffer("A", A.detach().clone().to(torch.float32))
-        self.register_buffer("B_vec", B_vec.detach().clone().to(torch.float32))
+        # Store A, B_vec, C, h0
+        self.register_buffer("A", A.detach().clone())
+        self.register_buffer("B_vec", B_vec.detach().clone())
         self.register_buffer("C", C.detach().clone())
         self.register_buffer("h0", h0.detach().clone())
 
@@ -172,9 +257,10 @@ class FixedDiagonalLDS(nn.Module):
             return
 
         D = self.A.numel()
-        # Ensure A is float32 for precomputation
-        A_f32 = self.A.to(torch.float32)
-        a = A_f32.view(1, D).repeat(T, 1) # (T, D)
+        D = self.A.numel()
+        # Use A directly
+        A = self.A
+        a = A.view(1, D).repeat(T, 1) # (T, D)
 
         steps = []
         offset = 1
@@ -207,11 +293,11 @@ class FixedDiagonalLDS(nn.Module):
         # Save original dtype for final cast
         orig_dtype = u.dtype
         
-        # Force computation in float32
-        u_f32 = u.to(torch.float32)
-        h0_f32 = self.h0.to(torch.float32)
-        B_vec_f32 = self.B_vec.to(torch.float32)
-        A_f32 = self.A.to(torch.float32)
+        # Use input dtype
+        u_in = u
+        h0 = self.h0
+        B_vec = self.B_vec
+        A = self.A
 
         # b_t = u_t * B_vec -> (N,T,D)
         if HAS_TRITON and u.is_cuda:
@@ -222,10 +308,10 @@ class FixedDiagonalLDS(nn.Module):
              # But if HAS_TRITON is true, we should probably still use it if it's stable. 
              # However, the user specifically mentioned "precomputing A^[nk]" which suggests the python path.
              # Let's use the python path for absolute safety if we are debugging instability, or ensure we pass f32 to triton.
-             h_seq = run_lds_scan(u_f32, A_f32, B_vec_f32, h0_f32)
-             return (h_seq @ self.C.to(torch.float32)).to(orig_dtype)
+             h_seq = run_lds_scan(u_in, A, B_vec, h0)
+             return (h_seq @ self.C).to(orig_dtype)
 
-        b = u_f32.unsqueeze(-1) * B_vec_f32.view(1, 1, D)
+        b = u_in.unsqueeze(-1) * B_vec.view(1, 1, D)
 
         if T in self.a_cache:
             # Use optimized path with precomputed A steps
@@ -236,18 +322,19 @@ class FixedDiagonalLDS(nn.Module):
             
             b_pref = affine_scan_with_fixed_a(b, cached_steps)
             a_pref = a_final
+            a_pref = a_final
         else:
             # Standard path: compute a on the fly
-            a = A_f32.view(1, D).repeat(T, 1)
+            a = A.view(1, D).repeat(T, 1)
             # We need a version of affine_scan that handles f32
             a_pref, b_pref = affine_scan_inclusive_inplace(a, b)
 
         # h_{t+1} = a_pref[t]*h0 + b_pref[t]
-        h_seq = b_pref + a_pref.unsqueeze(0) * h0_f32.view(1, 1, D)
+        h_seq = b_pref + a_pref.unsqueeze(0) * h0.view(1, 1, D)
 
         # y_t = h_{t+1} @ C
-        # inner matmul in float32, then cast back
-        out = h_seq @ self.C.to(torch.float32)
+        # inner matmul, then cast back
+        out = h_seq @ self.C
         return out.to(orig_dtype)
 
 

@@ -83,7 +83,7 @@ class MiniSTU(nn.Module):
             assert num_filters == 24, "LDS backend requires num_filters=24"
             
             # Load pre-trained LDS parameters
-            from .MiniSTU_lds import FixedDiagonalLDS, DistillSTUFast
+            from .stu_lds import FixedDiagonalLDS, DistillSTUFast
             import os
             
             lds_path = os.path.join(os.path.dirname(__file__), "80_phi_lds.pt")

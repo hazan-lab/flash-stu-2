@@ -8,6 +8,7 @@ A simplified, standalone implementation of the Spectral Transform Unit (STU) foc
 - 🎯 **LDS Learning**: Built-in support for learning linear dynamical systems
 - 🧪 **Research-Friendly**: Clean, understandable code for experimentation
 - 📦 **Lightweight**: Minimal dependencies (PyTorch + NumPy only)
+- 🚀 **Fast LDS Backend**: Optionally leverages SpectraLDS for 2x-3x speedup (training and inference) using `backend='lds'`
 
 ## Installation
 
@@ -102,6 +103,26 @@ stu1 = MiniSTU(128, 24, 10, 5, precomputed_filters=phi)
 stu2 = MiniSTU(128, 24, 10, 8, precomputed_filters=phi)
 ```
 
+### Training STU with LDS Backend
+
+You can use the optimized LDS backend for 2x-3x speedup by setting `backend='lds'`.
+
+> **Note**: This backend is slightly approximate but much faster. We recommend using `torch.float32` for stability.
+
+```python
+# Enable high precision for matmul (50% faster but worse error)
+# torch.set_float32_matmul_precision('high')
+
+stu = MiniSTU(
+    seq_len=1024,
+    num_filters=24,
+    input_dim=64,
+    output_dim=64,
+    backend='lds',  # Use optimized backend
+    dtype=torch.float32  # Recommended dtype
+)
+```
+
 ## API Reference
 
 ### `MiniSTU`
@@ -121,6 +142,7 @@ MiniSTU(
     dtype: torch.dtype = torch.float32,
     device: torch.device = None,
     precomputed_filters: torch.Tensor = None,
+    backend: str = 'spectral', # Backend to use: 'spectral' (default) or 'lds'
 )
 ```
 
