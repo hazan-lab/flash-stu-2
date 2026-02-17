@@ -89,24 +89,18 @@ class MiniSTU(nn.Module):
             lds_path = os.path.join(os.path.dirname(__file__), "80_phi_lds.pt")
             lds_data = torch.load(lds_path, map_location=self.device)['model_state_dict']
             
-            # Initialize LDS. Keep A, B, h0 in float32 for stability in recurrence.
-            # C can be in target dtype (e.g. bfloat16) as it's a projection.
-            # Note: The file likely contains float64 or float32.
-            A = lds_data['A'].to(dtype=torch.float32, device=self.device)
-            B = lds_data['B'].to(dtype=torch.float32, device=self.device)
+            #this is later downcasted to self.dtype
+            A = lds_data['A'].to(dtype=torch.float64, device=self.device)
+            B = lds_data['B'].to(dtype=torch.float64, device=self.device)
             C = lds_data['C'].to(dtype=self.dtype, device=self.device)
-            h0 = lds_data['h0'].to(dtype=torch.float32, device=self.device)
-            
-            # B in file is [1, D], FixedDiagonalLDS expects [D]
-            # C in file is [D, 48], FixedDiagonalLDS expects [D, O_lds]
-            # Here O_lds is 48 (2*K), but we just feed it to FixedDiagonalLDS
+            h0 = lds_data['h0'].to(dtype=torch.float64, device=self.device)
             
             self.lds_module = FixedDiagonalLDS(A, B.flatten(), C, h0)
             self.lds_module.precompute_scan_A(seq_len)
             
             # Initialize DistillSTUFast
             # It expects K, but uses it to determine n_filters.
-            # In the notebook: n_filters = 2 * K (since hankel_L=False).
+            # n_filters = 2 * K (since hankel_L=False).
             # The loaded C has output_dim=48, which matches 2*24.
             
             self.distill_stu = DistillSTUFast(

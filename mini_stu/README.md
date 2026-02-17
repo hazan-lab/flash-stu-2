@@ -120,6 +120,7 @@ stu = MiniSTU(
     output_dim=64,
     backend='lds',  # Use optimized backend
     dtype=torch.float32  # Recommended dtype
+    #bf16 for 4.3x (unstable), f32 for 2.3x, f64 for 1.7x
 )
 ```
 
