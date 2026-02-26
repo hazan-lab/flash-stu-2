@@ -19,8 +19,8 @@ log_info() {
 set -e
 trap 'log_info "Error on line $LINENO"; exit 1' ERR
 
-# Activate your virtual environment accordingly
-source activate .venv/bin/activate
+# Activate virtual environment
+source .venv/bin/activate
 
 # Get the first node (master node) from the SLURM_JOB_NODELIST
 MASTER_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)

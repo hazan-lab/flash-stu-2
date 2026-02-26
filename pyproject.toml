@@ -37,20 +37,25 @@ classifiers = [
 ]
 
 dependencies = [
-    "packaging==24.1",
-    "wheel==0.44.0",
-    "numpy==1.26.4",
-    "ninja==1.11.1.1",
-    "torch==2.4.1",
-    "triton==3.0.0",
-    "einops==0.8.0",
-    "liger-kernel==0.2.1",
-    "tiktoken==0.7.0",
-    "transformers==4.44.0",
-    "datasets==2.20.0",
-    "safetensors==0.4.4",
-    "psutil==6.0.0",
-    "matplotlib==3.9.2",
+    "packaging>=24.1",
+    "numpy>=1.26.4",
+    "ninja>=1.11",
+    "torch>=2.4",
+    "triton>=3.0",
+    "einops>=0.8",
+    "liger-kernel>=0.2",
+    "tiktoken>=0.7",
+    "transformers>=4.44",
+    "datasets>=2.20",
+    "safetensors>=0.4",
+    "psutil>=6.0",
+    "matplotlib>=3.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8.0",
 ]
 
 [tool.setuptools]
@@ -62,6 +67,20 @@ packages = ["flash_stu", "mini_stu"]
 [project.urls]
 Homepage = "https://arxiv.org/abs/2409.10489"
 Repository = "https://github.com/hazan-lab/flash-stu-2"
+
+# ===============================
+# uv Configuration
+# ===============================
+[tool.uv]
+# PyTorch CUDA index for GPU support
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+triton = { index = "pytorch-cu124" }
 
 # ===============================
 # Ruff Configuration

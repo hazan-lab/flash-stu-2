@@ -41,68 +41,54 @@ Flash STU is a hybrid architecture that interleaves spectral state space model l
 
 > **Note**: CUDA is required to run code from this repository.
 
-For optimal performance, this repository was tested with:
-- Python 3.12.5
-- PyTorch 2.4.1
-- Triton 3.0.0
-- CUDA 12.4
+This project uses [uv](https://docs.astral.sh/uv/) for fast, reproducible dependency management.
 
-and may be incompatible with other versions.
+### Prerequisites
+- Python 3.12+
+- CUDA 12.4+
+- [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 
-### Lightweight Installation (Recommended for Development)
+### Quick Setup (Recommended)
 
-For a minimal setup without CUDA-heavy dependencies like Flash Attention and Flash FFT:
+```bash
+git clone https://github.com/hazan-lab/flash-stu-2.git
+cd flash-stu-2
+uv sync
+```
 
-1. Install PyTorch with CUDA support:
-    ```bash
-    pip install torch --index-url https://download.pytorch.org/whl/cu124
-    ```
+This creates a `.venv/`, installs all dependencies (including PyTorch with CUDA support), and generates a lockfile for reproducibility.
 
-2. Install core dependencies only:
-   ```bash
-   pip install -e .
-   ```
-   
-   Or alternatively, use the minimal requirements file:
-   ```bash
-   pip install -r requirements-minimal.txt
-   ```
+### Optional: Flash Attention and Flash FFT Conv
 
-This lightweight installation includes all core dependencies (numpy, einops, transformers, etc.) but excludes the optional CUDA-heavy performance optimizations below.
+For maximum performance, install the optional CUDA-accelerated kernels:
 
-### Full Installation (For Maximum Performance)
+```bash
+# Flash Attention (prebuilt wheel, installs quickly)
+uv pip install flash-attn
 
-For optimal performance with Flash Attention and Flash FFT Conv optimizations:
+# Flash FFT Conv (requires CUDA at build time — run on a GPU node)
+uv pip install git+https://github.com/HazyResearch/flash-fft-conv.git#subdirectory=csrc/flashfftconv --no-build-isolation
+uv pip install git+https://github.com/HazyResearch/flash-fft-conv.git
+```
 
-1. Install PyTorch with CUDA support:
-    ```bash
-    pip install torch --index-url https://download.pytorch.org/whl/cu124
-    ```
+### Using pip (Alternative)
 
-2. Install core dependencies:
-   ```bash
-   pip install -e .
-   ```
+If you prefer pip over uv:
 
-3. Install Flash Attention (optional):
-   ```bash
-   MAX_JOBS=4 pip install flash-attn --no-build-isolation
-   ```
-
-4. Install Flash FFT Conv (optional):
-   ```bash
-    pip install git+https://github.com/HazyResearch/flash-fft-conv.git#subdirectory=csrc/flashfftconv
-    pip install git+https://github.com/HazyResearch/flash-fft-conv.git
-    ```
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install -e .
+```
 
 ### Install from Source
 
-Or install directly from GitHub:
 ```bash
-pip install git+https://github.com/hazan-lab/flash-stu-2.git
+uv pip install git+https://github.com/hazan-lab/flash-stu-2.git
 ```
 
-> **Note**: Installing from source will only install the lightweight version. For full performance, manually install Flash Attention and Flash FFT Conv as shown above.
+> **Note**: Installing from source will only install the core dependencies. For full performance, manually install Flash Attention and Flash FFT Conv as shown above.
 
 ## Quick Start
 
